@@ -449,10 +449,7 @@ async function submitForceChange(){const stu=DB.students.find(s=>s.id===session.
   logAction({type:'student',detail:'นักเรียนตั้งรหัสผ่านใหม่',byName:stu.name});save();
   document.getElementById('forceScreen').classList.add('hidden');soundOK();banner('ตั้งรหัสผ่านเรียบร้อย');
   enterApp();}
-
-/* ============================================================
-   APP SHELL
-   ============================================================ */
+  
 const TAB_DEF={
   users:['ผู้ใช้','<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.4" fill="#fff"/><path d="M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5z" fill="#fff"/><circle cx="17" cy="8.5" r="2.6" fill="#fff" opacity=".7"/><path d="M15 14.6c2.6.1 5 1.8 5 4.4h-5.2" fill="#fff" opacity=".7"/></svg>','var(--gRed)'],
   class:['ชั้นเรียน','<svg viewBox="0 0 24 24"><path d="M3 7.2l9-3.6 9 3.6-9 3.6z" fill="#fff"/><path d="M7 9.8V13c0 2 2.3 3.3 5 3.3s5-1.3 5-3.3V9.8" stroke="#fff" stroke-width="1.7" fill="none" stroke-linecap="round"/></svg>','var(--gBlue)'],
