@@ -341,7 +341,16 @@ function classLevelType(cls){const c=cls||activeCls();if(!c)return'primary';cons
 function termLabel(s){return(s.term==='1'||s.term==='2')?`ภาคเรียน ${s.term}/${s.year||''}`:`ปีการศึกษา ${s.year||''}`;}
 function thDate(iso){const d=new Date(iso);return`${d.getDate()} ${THMONTHS[d.getMonth()]} ${d.getFullYear()+543}`;}
 function thDateTime(iso){const d=new Date(iso);return`${thDate(iso)} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}น.`;}
-function logAction(o){DB.logs.unshift({id:uid(),at:new Date().toISOString(),by:session?.id,byName:session?.name,...o});if(DB.logs.length>500)DB.logs.length=500;}
+function logAction(o){
+  DB.logs.unshift({id:uid(),at:new Date().toISOString(),by:session?.id,byName:session?.name,...o});
+  if(DB.logs.length>500)DB.logs.length=500;
+  sb.from('logs').insert({
+    by_id:session?.id||null,by_name:session?.name||null,
+    type:o.type||null,detail:o.detail||null,classroom:o.classroom||null,
+    subject:o.subject||null,status:o.status||null,name:o.name||null
+  }).then(({error})=>{if(error)console.warn('log error:',error.message);});
+}
+  
 
 /* ---------- SOUND ---------- */
 let _ac;
@@ -680,12 +689,24 @@ function classroomModal(id){const c=id?clsById(id):null;
     <label class="fl">ปีการศึกษา</label><input id="cl_year" value="${c?esc(c.year):'2568'}">
     ${ownerSel}
     <div class="row" style="margin-top:8px"><button class="btn" onclick="saveClassroom('${id||''}')">บันทึก</button>${c?`<button class="btn red" onclick="delClassroom('${id}')">ลบ</button>`:''}<button class="btn gray" onclick="closeModal()">ยกเลิก</button></div>`);}
-function saveClassroom(id){const d={name:val('cl_name'),level:val('cl_level'),year:val('cl_year')};
+async function saveClassroom(id){
+  const d={name:val('cl_name'),level:val('cl_level'),year:val('cl_year')};
   if(!d.name)return banner('กรุณากรอกชื่อชั้น');
-  if(isAdmin())d.ownerId=val('cl_owner')||session.id;
-  if(id){const c=clsById(id);if(!canSeeClass(id))return banner('ไม่มีสิทธิ์',true);Object.assign(c,d);}
-  else{const nc={id:uid(),ownerId:isAdmin()?(d.ownerId||session.id):session.id,...d};DB.classrooms.push(nc);activeClassId=nc.id;wsOpen=nc.id;wsTab='students';logAction({type:'class',detail:'สร้างห้อง '+nc.name});}
-  save();closeModal();render();banner('บันทึกชั้นเรียนแล้ว');}
+  const owner=isAdmin()?(val('cl_owner')||session.id):session.id;
+  if(id){
+    if(!canSeeClass(id))return banner('ไม่มีสิทธิ์',true);
+    const {error}=await sb.from('classrooms').update({name:d.name,level:d.level,year:d.year,owner_id:owner}).eq('id',id);
+    if(error)return banner('บันทึกไม่สำเร็จ: '+error.message,true);
+    Object.assign(clsById(id),d,{ownerId:owner});
+  }else{
+    const {data,error}=await sb.from('classrooms').insert({name:d.name,level:d.level,year:d.year,owner_id:owner}).select().single();
+    if(error)return banner('บันทึกไม่สำเร็จ: '+error.message,true);
+    const nc={id:data.id,ownerId:data.owner_id,name:data.name,level:data.level||'',year:data.year||''};
+    DB.classrooms.push(nc);activeClassId=nc.id;wsOpen=nc.id;wsTab='students';
+    logAction({type:'class',detail:'สร้างห้อง '+nc.name});
+  }
+  closeModal();render();banner('บันทึกชั้นเรียนแล้ว');
+}
 function delClassroom(id){if(!canSeeClass(id))return banner('ไม่มีสิทธิ์',true);
   if(!confirm('ลบชั้นเรียนนี้พร้อมนักเรียน? (วิชาที่สอนหลายห้องจะแค่เอาห้องนี้ออก)'))return;
   DB.subjects.forEach(s=>{s.classroomIds=(s.classroomIds||[]).filter(x=>x!==id);});
