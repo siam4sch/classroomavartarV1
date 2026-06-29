@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="th">
 <head>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 
@@ -10,6 +10,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Mitr:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <style>
@@ -424,6 +425,13 @@ async function logout(){
   renderLoginBrand();
 }
 
+function renderLoginBrand(){
+  const t=document.getElementById('loginTitle');
+  if(t)t.textContent=DB.systemName||'ระบบชั้นเรียน';
+  const l=document.getElementById('loginLogo');
+  if(l)l.innerHTML=DB.logo?`<img src="${esc(DB.logo)}" onerror="this.parentNode.textContent='🎒'">`:'🎒';
+}
+  
 // boot: เช็คว่ามี session ค้างอยู่ไหม
 (async function boot(){
   renderLoginBrand();
