@@ -945,7 +945,7 @@ async function setNote(aid,sid,v){
   a.scores[sid].note=v;
   await saveScoreRow(aid,sid);
 }
-function setNote(aid,sid,v){const a=DB.assignments.find(x=>x.id===aid);a.scores=a.scores||{};a.scores[sid]=a.scores[sid]||{};a.scores[sid].note=v;save();}
+
 
 /* ============================================================
    SCAN
