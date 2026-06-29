@@ -269,6 +269,10 @@ body{font-size:16.5px;padding-bottom:110px}
    mustChange = true → ถูกบังคับตั้งรหัสใหม่หลังล็อกอิน
    ============================================================ */
 const DB_KEY='classroom_rbac_v3';
+/* ===== SUPABASE ===== */
+const SB_URL='https://jburieqpvqjyelhqdnkd.supabase.co';
+const SB_ANON='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpidXJpZXFwdnFqeWVsaHFkbmtkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI3MTUyMDMsImV4cCI6MjA5ODI5MTIwM30.9ukfC5IeJi8yuV2q4F9ZAruGEm1GOnhPH_kgcTIU-vY';
+const sb=window.supabase.createClient(SB_URL,SB_ANON,{auth:{persistSession:true}});
 let DB=load();
 let session=null;
 
@@ -375,39 +379,59 @@ document.getElementById('popupBg').addEventListener('click',()=>document.getElem
    ============================================================ */
 function studentSession(stu){return{id:'stu_'+stu.id,role:'student',name:stu.name,studentId:stu.id,username:stu.code};}
 function persistSession(id){try{sessionStorage.setItem('cr_uid',id);}catch(e){}}
+
 async function doLogin(){
   const u=val('loginUser'),p=val('loginPass');
   if(!u||!p)return banner('กรอกชื่อผู้ใช้และรหัสผ่าน',true);
-  // 1) บัญชีเจ้าหน้าที่ (ครู/แอดมิน)
-  const user=DB.users.find(x=>x.username.toLowerCase()===u.toLowerCase());
-  if(user){
-    if(!user.active){beep(300,.2,'sawtooth');return banner('บัญชีถูกระงับ',true);}
-    if(!await verifyPw(p,user.password)){beep(300,.2,'sawtooth');return banner('รหัสผ่านไม่ถูกต้อง',true);}
-    session=user;persistSession(user.id);
-    logAction({type:'auth',detail:'เข้าสู่ระบบ ('+ROLELABEL[user.role]+')'});save();soundOK();enterApp();return;
+
+  // หา email สำหรับ login
+  let email;
+  if(u.includes('@')) email=u;                                  // กรอก email ตรง ๆ
+  else if(/^\d+$/.test(u)) email=`s${u}@students.local`;        // ตัวเลขล้วน = รหัสนักเรียน
+  else {                                                         // ไม่งั้นถือเป็น username ครู
+    const {data,error}=await sb.rpc('email_for_username',{uname:u});
+    if(error||!data){beep(300,.2,'sawtooth');return banner('ไม่พบชื่อผู้ใช้นี้',true);}
+    email=data;
   }
-  // 2) นักเรียน: รหัสนักเรียน + (รหัสส่วนตัว หรือ วันเกิดถ้ายังไม่ตั้ง)
-  const stu=DB.students.find(s=>String(s.code||'')!==''&&String(s.code)===u);
-  if(stu){
-    let ok=false;
-    if(stu.pw){ok=await verifyPw(p,stu.pw);}                         // มีรหัสส่วนตัว/ชั่วคราว
-    else if(validBirth(stu.birthdate)){ok=(p===stu.birthdate);}      // ครั้งแรก: ใช้วันเกิด
-    else{beep(300,.2,'sawtooth');return banner('บัญชีนี้ยังไม่ได้ตั้งวันเกิด/รหัส — ติดต่อครู',true);}
-    if(!ok){beep(300,.2,'sawtooth');return banner('รหัสผ่านไม่ถูกต้อง',true);}
-    const ses=studentSession(stu);session=ses;persistSession(ses.id);
-    logAction({type:'auth',detail:'นักเรียนเข้าสู่ระบบ',byName:stu.name});save();soundOK();enterApp();return;
-  }
-  beep(300,.2,'sawtooth');banner('ไม่พบบัญชีนี้ในระบบ',true);
+
+  const {data:auth,error}=await sb.auth.signInWithPassword({email,password:p});
+  if(error){beep(300,.2,'sawtooth');return banner('เข้าสู่ระบบไม่สำเร็จ ตรวจรหัสผ่าน',true);}
+  await afterAuth(auth.user);
 }
-function logout(){if(session){logAction({type:'auth',detail:'ออกจากระบบ'});save();}
-  session=null;try{sessionStorage.removeItem('cr_uid');}catch(e){}closeModal();stopScanner();
-  document.querySelector('.topbar').style.display='none';document.getElementById('tabbar').style.display='none';
+
+// ดึงโปรไฟล์/บทบาทจาก Supabase แล้วเข้าแอป
+async function afterAuth(user){
+  const {data:prof}=await sb.from('profiles').select('*').eq('id',user.id).maybeSingle();
+  if(prof){
+    if(!prof.active){await sb.auth.signOut();return banner('บัญชีถูกระงับ',true);}
+    session={id:prof.id,role:prof.role,name:prof.name,username:prof.username,active:true};
+    soundOK();enterApp();return;
+  }
+  // ไม่มี profile = นักเรียน (จะเปิดใช้ในช่วงถัดไป)
+  banner('บัญชีนักเรียนจะเปิดใช้ในขั้นตอนถัดไป',true);
+  await sb.auth.signOut();
+}
+
+async function logout(){
+  try{await sb.auth.signOut();}catch(e){}
+  session=null;closeModal();stopScanner();
+  document.querySelector('.topbar').style.display='none';
+  document.getElementById('tabbar').style.display='none';
   document.getElementById('forceScreen').classList.add('hidden');
   document.getElementById('loginScreen').classList.remove('hidden');
-  document.getElementById('loginUser').value='';document.getElementById('loginPass').value='';
-  renderLoginBrand();}
-function renderLoginBrand(){document.getElementById('loginTitle').textContent=DB.systemName||'ระบบชั้นเรียน';
-  document.getElementById('loginLogo').innerHTML=DB.logo?`<img src="${esc(DB.logo)}" onerror="this.parentNode.textContent='🎒'">`:'🎒';}
+  document.getElementById('loginUser').value='';
+  document.getElementById('loginPass').value='';
+  renderLoginBrand();
+}
+
+// boot: เช็คว่ามี session ค้างอยู่ไหม
+(async function boot(){
+  renderLoginBrand();
+  const {data}=await sb.auth.getSession();
+  if(data?.session?.user){await afterAuth(data.session.user);}
+})();
+  
+
 
 /* ---------- FORCE PASSWORD CHANGE (นักเรียน) ---------- */
 function showForceChange(){const stu=DB.students.find(s=>s.id===session.studentId);
@@ -1106,25 +1130,7 @@ function exportCSV(){const rows=[['ห้องเรียน','เลขที
   dl(`students_${today()}.csv`,csv,'text/csv;charset=utf-8');banner('ส่งออก CSV แล้ว');}
 function exportJSON(){if(!isAdmin())return;dl(`backup_${today()}.json`,JSON.stringify(DB,null,2),'application/json');banner('สำรองข้อมูล JSON แล้ว');}
 
-/* ============================================================
-   BOOT — กู้คืนเซสชันถ้ายังล็อกอินค้างอยู่
-   ============================================================ */
-(function boot(){
-  renderLoginBrand();
-  let saved=null;try{saved=sessionStorage.getItem('cr_uid');}catch(e){}
-  if(saved){
-    if(saved.startsWith('stu_')){
-      const sid=saved.slice(4);const stu=DB.students.find(s=>s.id===sid);
-      if(stu){session=studentSession(stu);
-        if(stu.mustChange){enterApp();return;}
-        enterApp();return;}
-    }else{
-      const u=userById(saved);
-      if(u&&u.active){session=u;enterApp();return;}
-    }
-    try{sessionStorage.removeItem('cr_uid');}catch(e){}
-  }
-})();
+
 </script>
 </body>
 </html>
