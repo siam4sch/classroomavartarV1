@@ -903,16 +903,43 @@ function assignModal(id){const a=id?DB.assignments.find(x=>x.id===id):null;const
     <div class="row"><div style="flex:1"><label class="fl">คะแนนเต็ม</label><input id="a_full" type="number" value="${a?a.fullScore:10}"></div><div style="flex:1.3"><label class="fl">กำหนดส่ง</label><input id="a_due" type="datetime-local" value="${a?(a.due||''):''}"></div></div>
     <p class="meta" style="margin-bottom:12px">วันที่สร้าง: ${a?a.createdAt:today()}</p>
     <div class="row"><button class="btn" onclick="saveAssign('${id||''}')">บันทึก</button>${a?`<button class="btn red" onclick="delAssign('${id}')">ลบ</button>`:''}<button class="btn gray" onclick="closeModal()">ยกเลิก</button></div>`);}
-function saveAssign(id){const d={name:val('a_name'),type:val('a_type'),fullScore:+val('a_full')||10,due:val('a_due'),subjectId:assignSubj};
+async function saveAssign(id){
+  const d={name:val('a_name'),type:val('a_type'),full_score:+val('a_full')||10,due:val('a_due')||null,subject_id:assignSubj};
   if(!d.name)return banner('กรุณากรอกชื่อชิ้นงาน');
-  if(id)Object.assign(DB.assignments.find(x=>x.id===id),d);else DB.assignments.push({id:uid(),scores:{},createdAt:today(),...d});
-  save();closeModal();wsTab='assign';render();banner('บันทึกชิ้นงานแล้ว');}
-function delAssign(id){if(!confirm('ลบชิ้นงานนี้?'))return;DB.assignments=DB.assignments.filter(x=>x.id!==id);save();closeModal();render();banner('ลบแล้ว');}
+  if(id){
+    const {error}=await sb.from('assignments').update(d).eq('id',id);
+    if(error)return banner('บันทึกไม่สำเร็จ: '+error.message,true);
+    Object.assign(DB.assignments.find(x=>x.id===id),{name:d.name,type:d.type,fullScore:d.full_score,due:val('a_due')||''});
+  }else{
+    const {data,error}=await sb.from('assignments').insert({...d,created_at:today()}).select().single();
+    if(error)return banner('บันทึกไม่สำเร็จ: '+error.message,true);
+    DB.assignments.push({id:data.id,subjectId:data.subject_id,name:data.name,type:data.type||'during',fullScore:data.full_score||10,due:data.due?data.due.slice(0,16):'',createdAt:data.created_at||today(),scores:{}});
+  }
+  closeModal();wsTab='assign';render();banner('บันทึกชิ้นงานแล้ว');
+}
+async function delAssign(id){
+  if(!confirm('ลบชิ้นงานนี้?'))return;
+  const {error}=await sb.from('assignments').delete().eq('id',id);
+  if(error)return banner('ลบไม่สำเร็จ: '+error.message,true);
+  DB.assignments=DB.assignments.filter(x=>x.id!==id);
+  closeModal();render();banner('ลบแล้ว');
+}
 function gradeModal(id){const a=DB.assignments.find(x=>x.id===id);const sub=subjById(a.subjectId);const classes=(sub.classroomIds||[]).map(clsById).filter(Boolean);
   openModal(`<h2>ให้คะแนน: ${esc(a.name)}</h2><p class="meta" style="margin-bottom:12px">เต็ม ${a.fullScore} · ${esc(sub.name)}</p>
     ${classes.map(c=>`<div style="margin:6px 0 4px;font-weight:600;color:var(--purple)">🏫 ${esc(c.name)}</div>`+studentsOf(c.id).map(st=>{const sc=a.scores?.[st.id]||{};return`<div style="margin-bottom:12px;border-bottom:1px solid var(--sep);padding-bottom:10px"><div class="row" style="align-items:center"><div style="width:28px">${avatarSVG(st.avatar,28)}</div><div style="flex:1;font-size:14px">${st.number}. ${esc(st.name)} ${sc.submittedAt?`<span class="pill student">ส่งแล้ว</span>`:''}</div><input type="number" max="${a.fullScore}" value="${sc.value??''}" placeholder="-" style="width:62px;margin:0" onchange="setScore('${id}','${st.id}',this.value)"></div><input placeholder="หมายเหตุ..." value="${esc(sc.note||'')}" style="margin:8px 0 0;font-size:13px" onchange="setNote('${id}','${st.id}',this.value)"></div>`;}).join('')).join('')}
     <button class="btn" style="margin-top:8px" onclick="closeModal()">เสร็จสิ้น</button>`);}
-function setScore(aid,sid,v){const a=DB.assignments.find(x=>x.id===aid);a.scores=a.scores||{};a.scores[sid]=a.scores[sid]||{};a.scores[sid].value=v===''?null:+v;save();}
+async function setScore(aid,sid,v){
+  const a=DB.assignments.find(x=>x.id===aid);a.scores=a.scores||{};a.scores[sid]=a.scores[sid]||{};
+  a.scores[sid].value=v===''?null:+v;
+  const {error}=await sb.from('scores').upsert({assignment_id:aid,student_id:sid,value:v===''?null:+v},{onConflict:'assignment_id,student_id'});
+  if(error)banner('บันทึกคะแนนไม่สำเร็จ: '+error.message,true);
+}
+async function setNote(aid,sid,v){
+  const a=DB.assignments.find(x=>x.id===aid);a.scores=a.scores||{};a.scores[sid]=a.scores[sid]||{};
+  a.scores[sid].note=v;
+  const {error}=await sb.from('scores').upsert({assignment_id:aid,student_id:sid,note:v},{onConflict:'assignment_id,student_id'});
+  if(error)banner('บันทึกหมายเหตุไม่สำเร็จ: '+error.message,true);
+}
 function setNote(aid,sid,v){const a=DB.assignments.find(x=>x.id===aid);a.scores=a.scores||{};a.scores[sid]=a.scores[sid]||{};a.scores[sid].note=v;save();}
 
 /* ============================================================
