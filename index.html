@@ -406,11 +406,57 @@ async function afterAuth(user){
   if(prof){
     if(!prof.active){await sb.auth.signOut();return banner('บัญชีถูกระงับ',true);}
     session={id:prof.id,role:prof.role,name:prof.name,username:prof.username,active:true};
+    banner('กำลังโหลดข้อมูล...');
+    await loadFromSupabase();
     soundOK();enterApp();return;
   }
-  // ไม่มี profile = นักเรียน (จะเปิดใช้ในช่วงถัดไป)
   banner('บัญชีนักเรียนจะเปิดใช้ในขั้นตอนถัดไป',true);
   await sb.auth.signOut();
+}
+async function loadFromSupabase(){
+  const [rSet,rProf,rCls,rStu,rSubj,rSubCls,rAsg,rScore,rAtt,rLog]=await Promise.all([
+    sb.from('settings').select('*'),
+    sb.from('profiles').select('*'),
+    sb.from('classrooms').select('*'),
+    sb.from('students').select('*'),
+    sb.from('subjects').select('*'),
+    sb.from('subject_classrooms').select('*'),
+    sb.from('assignments').select('*'),
+    sb.from('scores').select('*'),
+    sb.from('attendance').select('*'),
+    sb.from('logs').select('*').order('at',{ascending:false}).limit(200),
+  ]);
+  [rSet,rProf,rCls,rStu,rSubj,rSubCls,rAsg,rScore,rAtt,rLog].forEach(r=>{if(r.error)console.warn('load error:',r.error.message);});
+
+  DB=blankDB();DB.users=[];DB.classrooms=[];DB.students=[];DB.subjects=[];DB.assignments=[];DB.logs=[];
+
+  // settings
+  const st=(rSet.data||[])[0];
+  if(st){DB.systemName=st.system_name||'ระบบเช็กชื่อห้องเรียน';DB.logo=st.logo||'';DB.school=st.school||'';DB.weights=st.weights||{during:70,final:30};}
+
+  // users
+  DB.users=(rProf.data||[]).map(p=>({id:p.id,username:p.username,name:p.name,role:p.role,active:p.active}));
+
+  // classrooms
+  DB.classrooms=(rCls.data||[]).map(c=>({id:c.id,ownerId:c.owner_id,name:c.name,level:c.level||'',year:c.year||''}));
+
+  // subject -> classroomIds
+  const scMap={};
+  (rSubCls.data||[]).forEach(r=>{(scMap[r.subject_id]=scMap[r.subject_id]||[]).push(r.classroom_id);});
+  DB.subjects=(rSubj.data||[]).map(s=>({id:s.id,ownerId:s.owner_id,code:s.code||'',name:s.name,credits:s.credits||0,term:s.term||'year',year:s.year||'',schedule:s.schedule||[],classroomIds:scMap[s.id]||[]}));
+
+  // attendance -> student.attendance["subjId|date"]
+  const attMap={};
+  (rAtt.data||[]).forEach(a=>{(attMap[a.student_id]=attMap[a.student_id]||{})[a.subject_id+'|'+a.date]=a.status;});
+  DB.students=(rStu.data||[]).map(s=>({id:s.id,classroomId:s.classroom_id,number:s.number||'',name:s.name,code:s.code||'',birthdate:s.birthdate||'',points:s.points||0,avatar:s.avatar||defaultAvatar(s.code||s.name),mustChange:s.must_change,pw:'',user_id:s.user_id,attendance:attMap[s.id]||{}}));
+
+  // scores -> assignment.scores[studentId]
+  const scoreMap={};
+  (rScore.data||[]).forEach(x=>{(scoreMap[x.assignment_id]=scoreMap[x.assignment_id]||{})[x.student_id]={value:x.value,note:x.note||'',submittedAt:x.submitted_at};});
+  DB.assignments=(rAsg.data||[]).map(a=>({id:a.id,subjectId:a.subject_id,name:a.name,type:a.type||'during',fullScore:a.full_score||10,due:a.due?a.due.slice(0,16):'',createdAt:a.created_at||today(),scores:scoreMap[a.id]||{}}));
+
+  // logs
+  DB.logs=(rLog.data||[]).map(l=>({id:l.id,at:l.at,by:l.by_id,byName:l.by_name,type:l.type,detail:l.detail,classroom:l.classroom,subject:l.subject,status:l.status,name:l.name}));
 }
 
 async function logout(){
