@@ -862,12 +862,38 @@ function subjectModal(id){const s=id?subjById(id):null;window._tmpSchedule=s?JSO
     <label class="fl" style="margin-top:6px">เวลาเรียน</label><div id="schedBox">${renderSchedRows()}</div>
     <button class="btn sm gray" style="margin-bottom:14px" onclick="addSched()">+ เพิ่มคาบเรียน</button>
     <div class="row"><button class="btn" onclick="saveSubject('${id||''}')">บันทึก</button>${s?`<button class="btn red" onclick="delSubject('${id}')">ลบ</button>`:''}<button class="btn gray" onclick="closeModal()">ยกเลิก</button></div>`);}
-function saveSubject(id){const d={code:val('sj_code'),name:val('sj_name'),credits:+val('sj_credit')||0,term:val('sj_term')||'year',year:activeCls()?.year||'',schedule:window._tmpSchedule||[],classroomIds:[...(window._tmpClsIds||[])]};
+async function saveSubject(id){
+  const d={code:val('sj_code'),name:val('sj_name'),credits:+val('sj_credit')||0,term:val('sj_term')||'year',year:activeCls()?.year||'',schedule:window._tmpSchedule||[]};
+  const clsIds=[...(window._tmpClsIds||[])];
   if(!d.name)return banner('กรุณากรอกชื่อรายวิชา');
-  if(!d.classroomIds.length)return banner('เลือกอย่างน้อยหนึ่งห้องเรียน',true);
-  if(id)Object.assign(subjById(id),d);else{const ns={id:uid(),ownerId:session.id,...d};DB.subjects.push(ns);assignSubj=ns.id;}
-  save();closeModal();wsTab='subjects';render();banner(`บันทึกรายวิชาแล้ว (${d.classroomIds.length} ห้อง)`);}
-function delSubject(id){if(!confirm('ลบรายวิชานี้พร้อมชิ้นงานทั้งหมด?'))return;DB.assignments=DB.assignments.filter(a=>a.subjectId!==id);DB.subjects=DB.subjects.filter(x=>x.id!==id);save();closeModal();render();banner('ลบแล้ว');}
+  if(!clsIds.length)return banner('เลือกอย่างน้อยหนึ่งห้องเรียน',true);
+  let sid=id;
+  if(id){
+    const {error}=await sb.from('subjects').update(d).eq('id',id);
+    if(error)return banner('บันทึกไม่สำเร็จ: '+error.message,true);
+  }else{
+    const {data,error}=await sb.from('subjects').insert({...d,owner_id:session.id}).select().single();
+    if(error)return banner('บันทึกไม่สำเร็จ: '+error.message,true);
+    sid=data.id;
+  }
+  // sync ตารางเชื่อม: ลบลิงก์เก่าทั้งหมดแล้วใส่ใหม่
+  await sb.from('subject_classrooms').delete().eq('subject_id',sid);
+  const {error:e2}=await sb.from('subject_classrooms').insert(clsIds.map(cid=>({subject_id:sid,classroom_id:cid})));
+  if(e2)return banner('บันทึกห้องไม่สำเร็จ: '+e2.message,true);
+  // อัปเดต DB ในเครื่อง
+  if(id){Object.assign(subjById(id),d,{classroomIds:clsIds});}
+  else{DB.subjects.push({id:sid,ownerId:session.id,...d,classroomIds:clsIds});assignSubj=sid;}
+  closeModal();wsTab='subjects';render();banner(`บันทึกรายวิชาแล้ว (${clsIds.length} ห้อง)`);
+}
+async function delSubject(id){
+  if(!confirm('ลบรายวิชานี้พร้อมชิ้นงานและคะแนนทั้งหมด?'))return;
+  const {error}=await sb.from('subjects').delete().eq('id',id);
+  if(error)return banner('ลบไม่สำเร็จ: '+error.message,true);
+  DB.assignments=DB.assignments.filter(a=>a.subjectId!==id);
+  DB.subjects=DB.subjects.filter(x=>x.id!==id);
+  logAction({type:'subject',detail:'ลบรายวิชา'});
+  closeModal();render();banner('ลบแล้ว');
+}
 
 /* ---------- ASSIGNMENT ---------- */
 function assignModal(id){const a=id?DB.assignments.find(x=>x.id===id):null;const sub=subjById(assignSubj);
