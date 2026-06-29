@@ -928,17 +928,22 @@ function gradeModal(id){const a=DB.assignments.find(x=>x.id===id);const sub=subj
   openModal(`<h2>ให้คะแนน: ${esc(a.name)}</h2><p class="meta" style="margin-bottom:12px">เต็ม ${a.fullScore} · ${esc(sub.name)}</p>
     ${classes.map(c=>`<div style="margin:6px 0 4px;font-weight:600;color:var(--purple)">🏫 ${esc(c.name)}</div>`+studentsOf(c.id).map(st=>{const sc=a.scores?.[st.id]||{};return`<div style="margin-bottom:12px;border-bottom:1px solid var(--sep);padding-bottom:10px"><div class="row" style="align-items:center"><div style="width:28px">${avatarSVG(st.avatar,28)}</div><div style="flex:1;font-size:14px">${st.number}. ${esc(st.name)} ${sc.submittedAt?`<span class="pill student">ส่งแล้ว</span>`:''}</div><input type="number" max="${a.fullScore}" value="${sc.value??''}" placeholder="-" style="width:62px;margin:0" onchange="setScore('${id}','${st.id}',this.value)"></div><input placeholder="หมายเหตุ..." value="${esc(sc.note||'')}" style="margin:8px 0 0;font-size:13px" onchange="setNote('${id}','${st.id}',this.value)"></div>`;}).join('')).join('')}
     <button class="btn" style="margin-top:8px" onclick="closeModal()">เสร็จสิ้น</button>`);}
+async function saveScoreRow(aid,sid){
+  const a=DB.assignments.find(x=>x.id===aid);const c=a.scores[sid]||{};
+  const {error}=await sb.from('scores').upsert(
+    {assignment_id:aid,student_id:sid,value:(c.value==null||c.value==='')?null:+c.value,note:c.note||null},
+    {onConflict:'assignment_id,student_id'});
+  if(error)banner('บันทึกไม่สำเร็จ: '+error.message,true);
+}
 async function setScore(aid,sid,v){
   const a=DB.assignments.find(x=>x.id===aid);a.scores=a.scores||{};a.scores[sid]=a.scores[sid]||{};
   a.scores[sid].value=v===''?null:+v;
-  const {error}=await sb.from('scores').upsert({assignment_id:aid,student_id:sid,value:v===''?null:+v},{onConflict:'assignment_id,student_id'});
-  if(error)banner('บันทึกคะแนนไม่สำเร็จ: '+error.message,true);
+  await saveScoreRow(aid,sid);
 }
 async function setNote(aid,sid,v){
   const a=DB.assignments.find(x=>x.id===aid);a.scores=a.scores||{};a.scores[sid]=a.scores[sid]||{};
   a.scores[sid].note=v;
-  const {error}=await sb.from('scores').upsert({assignment_id:aid,student_id:sid,note:v},{onConflict:'assignment_id,student_id'});
-  if(error)banner('บันทึกหมายเหตุไม่สำเร็จ: '+error.message,true);
+  await saveScoreRow(aid,sid);
 }
 function setNote(aid,sid,v){const a=DB.assignments.find(x=>x.id===aid);a.scores=a.scores||{};a.scores[sid]=a.scores[sid]||{};a.scores[sid].note=v;save();}
 
