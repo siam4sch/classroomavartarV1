@@ -996,6 +996,18 @@ function renderScan(){setTopActions('');const el=document.getElementById('page-s
   const aCur=DB.assignments.find(x=>x.id===scanAssignId);
   const doneAtt=studs.filter(s=>s.attendance?.[attKey(scanSubjId,scanDate)]).length;
   const doneWork=aCur?studs.filter(s=>aCur.scores?.[s.id]?.submittedAt).length:0;
+
+  const manualBlock=studs.length
+    ?`<div class="grid">${studs.map(s=>{const done=s.attendance?.[attKey(scanSubjId,scanDate)]||'';const picked=window._pending.has(s.id);
+        return`<div class="scard ${picked?'picked':''} ${done?'locked':''}" onclick="${done?`undoAtt('${s.id}')`:`togglePending('${s.id}')`}">${done?`<div class="att ${done}"></div>`:picked?`<div class="pick">✓</div>`:''}<div class="avatar">${avatarSVG(s.avatar,54)}</div><div class="name">${s.number}. ${esc(s.name.split(' ')[0])}</div><div class="code" style="color:${done?ATTCOLOR[done]:picked?'var(--blue)':'var(--label)'}">${done?'🔒 '+ATTLABEL[done]+' · แตะลบ':picked?'✓ เลือกแล้ว':'แตะเพื่อเลือก'}</div></div>`;
+      }).join('')}</div>
+      <div class="savebar"><button class="btn green" ${window._pending.size?'':'disabled'} onclick="commitManual()">💾 บันทึก ${ATTLABEL[manualMode]} (${window._pending.size} คน)</button>${window._pending.size?`<button class="btn gray" onclick="clearPending()">ล้าง</button>`:''}</div>`
+    :`<p class="meta">ห้องนี้ยังไม่มีนักเรียน</p>`;
+
+  const workBlock=(()=>{const a=DB.assignments.find(x=>x.id===scanAssignId);if(!a)return'<p class="meta">ยังไม่ได้เลือกชิ้นงาน</p>';
+    const subd=studs.filter(s=>a.scores?.[s.id]?.submittedAt);
+    return subd.length?`<p class="meta" style="margin:4px 0 10px">แตะนักเรียนเพื่อยกเลิกการรับงาน (กรณีผิดพลาด)</p><div class="grid">`+subd.map(s=>`<div class="scard locked" onclick="undoWork('${a.id}','${s.id}')"><div class="att present"></div><div class="avatar">${avatarSVG(s.avatar,54)}</div><div class="name">${s.number}. ${esc(s.name.split(' ')[0])}</div><div class="code" style="color:var(--green)">🔒 ส่งแล้ว · แตะลบ</div></div>`).join('')+`</div>`:'<p class="meta">ยังไม่มีใครส่งงาน</p>';})();
+
   el.innerHTML=`<div class="listcard">
       <div class="row" style="margin-bottom:10px"><button class="btn sm ${scanMode==='att'?'':'gray'}" onclick="window._pending.clear();scanMode='att';render()">เช็กชื่อ</button><button class="btn sm ${scanMode==='work'?'':'gray'}" onclick="window._pending.clear();scanMode='work';render()">รับงาน</button></div>
       <label class="fl">รายวิชา</label><select style="margin-bottom:6px" onchange="window._pending.clear();scanSubjId=this.value;scanClsId=null;scanAssignId=null;render()">${subjOptions}</select>
@@ -1005,43 +1017,13 @@ function renderScan(){setTopActions('');const el=document.getElementById('page-s
       <div class="row"><input id="codeIn" placeholder="เช่น 12345" style="margin:0;flex:1" onkeydown="if(event.key==='Enter')markByCode()"><button class="btn green" onclick="markByCode()">บันทึก</button></div>
       <div id="reader" style="border-radius:14px;overflow:hidden;margin-top:12px"></div>
       <div class="row" style="margin-top:10px"><button class="btn" onclick="startScanner()">เปิดกล้องยิง QR</button><button class="btn gray" onclick="stopScanner();render()">หยุด</button></div></div>
-    ${scanMode==='att'?`<div class="listcard"><h3>👆 เช็กชื่อด้วยมือ</h3>
-      <p class="meta" style="margin:4px 0 10px">1) เลือกสถานะ → 2) แตะเลือกนักเรียน (เลือกได้หลายคน) → 3) กดบันทึก · คนที่เช็กแล้วจะล็อก 🔒 กันเช็กซ้ำ</p>
-      <div class="row" style="margin-bottom:12px">${modes.map(([k,lb,c])=>`<button class="btn sm ${manualMode===k?c:'gray'}" onclick="setManualMode('${k}')">${lb}</button>`).join('')}</div>
-      ${studs.length?`<div class="grid">${studs.map(s=>{const done=s.attendance?.[attKey(scanSubjId,scanDate)]||'';const picked=window._pending.has(s.id);
-        return`<div class="scard ${picked?'picked':''} ${done?'locked':''}" onclick="${done?`undoAtt('${s.id}')`:`togglePending('${s.id}')`}">${done?`<div class="att ${done}"></div>`:picked?`<div class="pick">✓</div>`:''}<div class="avatar">${avatarSVG(s.avatar,54)}</div><div class="name">${s.number}. ${esc(s.name.split(' ')[0])}</div><div class="code" style="color:${done?ATTCOLOR[done]:picked?'var(--blue)':'var(--label)'}">${done?'🔒 '+ATTLABEL[done]+' · แตะลบ':picked?'✓ เลือกแล้ว':'แตะเพื่อเลือก'}</div></div>`;
-        <div class="savebar"><button class="btn green" ${window._pending.size?'':'disabled'} onclick="commitManual()">💾 บันทึก ${ATTLABEL[manualMode]} (${window._pending.size} คน)</button>${window._pending.size?`<button class="btn gray" onclick="clearPending()">ล้าง</button>`:''}</div>`
-        :`<p class="meta">ห้องนี้ยังไม่มีนักเรียน</p>`}</div>`:''}
-        :`<div class="listcard"><h3>📦 รายชื่อที่ส่งงานแล้ว</h3>${(()=>{const a=DB.assignments.find(x=>x.id===scanAssignId);if(!a)return'<p class="meta">ยังไม่ได้เลือกชิ้นงาน</p>';const subd=studs.filter(s=>a.scores?.[s.id]?.submittedAt);return subd.length?`<p class="meta" style="margin:4px 0 10px">แตะนักเรียนเพื่อยกเลิกการรับงาน (กรณีผิดพลาด)</p><div class="grid">`+subd.map(s=>`<div class="scard locked" onclick="undoWork('${a.id}','${s.id}')"><div class="att present"></div><div class="avatar">${avatarSVG(s.avatar,54)}</div><div class="name">${s.number}. ${esc(s.name.split(' ')[0])}</div><div class="code" style="color:var(--green)">🔒 ส่งแล้ว · แตะลบ</div></div>`).join('')+`</div>`:'<p class="meta">ยังไม่มีใครส่งงาน</p>';})()}</div>`}
-async function markByCode(){const ctx=scanCtx();if(!ctx)return;const code=val('codeIn');if(!code)return;
-  const stu=ctx.studs.find(s=>String(s.code)===code);if(!stu){beep(300,.2,'sawtooth');return banner('ไม่พบรหัส '+code+' ในห้องนี้',true);}
-  await applyMark(stu,ctx);document.getElementById('codeIn').value='';document.getElementById('codeIn').focus();}
-async function applyMark(stu,ctx,fromCamera){const{sub,cls}=ctx;
-  if(scanMode==='att'){
-    const k=attKey(scanSubjId,scanDate);stu.attendance=stu.attendance||{};
-    if(stu.attendance[k]){beep(500,.08);popupSuccess('เช็กไปแล้ว',[`${esc(stu.name)}`,`สถานะ: ${ATTLABEL[stu.attendance[k]]}`,`แตะการ์ดที่ล็อกเพื่อยกเลิก`]);if(!fromCamera)render();return;}
-    const {error}=await sb.from('attendance').upsert(
-      {student_id:stu.id,subject_id:scanSubjId,date:scanDate,status:'present'},
-      {onConflict:'student_id,subject_id,date'});
-    if(error){beep(300,.2,'sawtooth');return banner('บันทึกไม่สำเร็จ: '+error.message,true);}
-    stu.attendance[k]='present';
-    logAction({type:'att',name:stu.name,classroom:cls.name,subject:sub?.name||'',status:'present',detail:'มาเรียน'});
-    soundOK();
-    popupSuccess('บันทึกสำเร็จ',[`รหัส <b>${esc(stu.code||'-')}</b>`,`${esc(stu.name)}`,`${esc(cls.name)} · ${esc(sub?.name||'')}`,thDateTime(new Date().toISOString())]);
-    if(!fromCamera)render();
-  }else{const a=DB.assignments.find(x=>x.id===scanAssignId);if(!a)return banner('ยังไม่ได้เลือกชิ้นงาน',true);
-    a.scores=a.scores||{};a.scores[stu.id]=a.scores[stu.id]||{};
-    if(a.scores[stu.id].submittedAt){beep(500,.08);popupSuccess('รับงานไปแล้ว',[`${esc(stu.name)}`,`ส่ง: ${esc(a.name)}`,`แตะรายชื่อด้านล่างเพื่อยกเลิก`]);if(!fromCamera)render();return;}
-    const ts=new Date().toISOString();const c=a.scores[stu.id];
-    const {error}=await sb.from('scores').upsert(
-      {assignment_id:scanAssignId,student_id:stu.id,value:(c.value==null||c.value==='')?null:+c.value,note:c.note||null,submitted_at:ts},
-      {onConflict:'assignment_id,student_id'});
-    if(error){beep(300,.2,'sawtooth');return banner('บันทึกไม่สำเร็จ: '+error.message,true);}
-    a.scores[stu.id].submittedAt=ts;
-    logAction({type:'work',name:stu.name,classroom:cls.name,subject:sub?.name||'',detail:'ส่งงาน: '+a.name});
-    soundOK();
-    popupSuccess('รับงานสำเร็จ',[`รหัส <b>${esc(stu.code||'-')}</b>`,`${esc(stu.name)}`,`ส่ง: ${esc(a.name)}`,thDateTime(new Date().toISOString())]);
-    if(!fromCamera)render();}}
+    ${scanMode==='att'
+      ?`<div class="listcard"><h3>👆 เช็กชื่อด้วยมือ</h3>
+          <p class="meta" style="margin:4px 0 10px">1) เลือกสถานะ → 2) แตะเลือกนักเรียน (เลือกได้หลายคน) → 3) กดบันทึก · คนที่เช็กแล้วจะล็อก 🔒 กันเช็กซ้ำ</p>
+          <div class="row" style="margin-bottom:12px">${modes.map(([k,lb,c])=>`<button class="btn sm ${manualMode===k?c:'gray'}" onclick="setManualMode('${k}')">${lb}</button>`).join('')}</div>
+          ${manualBlock}</div>`
+      :`<div class="listcard"><h3>📦 รายชื่อที่ส่งงานแล้ว</h3>${workBlock}</div>`}
+    <div class="listcard"><h3>🕒 ประวัติล่าสุด</h3>${recent.length?recent.map(l=>`<div class="logrow"><span class="ld" style="background:${l.status?ATTCOLOR[l.status]:'var(--blue)'}"></span><div style="flex:1"><b>${esc(l.name)}</b><div class="meta">${esc(l.subject||'')} · ${esc(l.detail||'')}</div></div><span class="meta">${thDateTime(l.at).split(' ').slice(-1)[0]}</span></div>`).join(''):'<p class="meta">ยังไม่มีรายการ</p>'}</div>`;}
 
 async function undoAtt(id){const ctx=scanCtx();if(!ctx)return;
   const s=DB.students.find(x=>x.id===id);if(!s)return;
