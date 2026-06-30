@@ -1009,17 +1009,17 @@ function renderScan(){setTopActions('');const el=document.getElementById('page-s
       <p class="meta" style="margin:4px 0 10px">1) เลือกสถานะ → 2) แตะเลือกนักเรียน (เลือกได้หลายคน) → 3) กดบันทึก · คนที่เช็กแล้วจะล็อก 🔒 กันเช็กซ้ำ</p>
       <div class="row" style="margin-bottom:12px">${modes.map(([k,lb,c])=>`<button class="btn sm ${manualMode===k?c:'gray'}" onclick="setManualMode('${k}')">${lb}</button>`).join('')}</div>
       ${studs.length?`<div class="grid">${studs.map(s=>{const done=s.attendance?.[attKey(scanSubjId,scanDate)]||'';const picked=window._pending.has(s.id);
-        return`<div class="scard ${picked?'picked':''} ${done?'locked':''}" onclick="${done?'':`togglePending('${s.id}')`}">${done?`<div class="att ${done}"></div>`:picked?`<div class="pick">✓</div>`:''}<div class="avatar">${avatarSVG(s.avatar,54)}</div><div class="name">${s.number}. ${esc(s.name.split(' ')[0])}</div><div class="code" style="color:${done?ATTCOLOR[done]:picked?'var(--blue)':'var(--label)'}">${done?'🔒 '+ATTLABEL[done]:picked?'✓ เลือกแล้ว':'แตะเพื่อเลือก'}</div></div>`;}).join('')}</div>
+        return`<div class="scard ${picked?'picked':''} ${done?'locked':''}" onclick="${done?`undoAtt('${s.id}')`:`togglePending('${s.id}')`}">${done?`<div class="att ${done}"></div>`:picked?`<div class="pick">✓</div>`:''}<div class="avatar">${avatarSVG(s.avatar,54)}</div><div class="name">${s.number}. ${esc(s.name.split(' ')[0])}</div><div class="code" style="color:${done?ATTCOLOR[done]:picked?'var(--blue)':'var(--label)'}">${done?'🔒 '+ATTLABEL[done]+' · แตะลบ':picked?'✓ เลือกแล้ว':'แตะเพื่อเลือก'}</div></div>`;
         <div class="savebar"><button class="btn green" ${window._pending.size?'':'disabled'} onclick="commitManual()">💾 บันทึก ${ATTLABEL[manualMode]} (${window._pending.size} คน)</button>${window._pending.size?`<button class="btn gray" onclick="clearPending()">ล้าง</button>`:''}</div>`
         :`<p class="meta">ห้องนี้ยังไม่มีนักเรียน</p>`}</div>`:''}
-    <div class="listcard"><h3>🕒 ประวัติล่าสุด</h3>${recent.length?recent.map(l=>`<div class="logrow"><span class="ld" style="background:${l.status?ATTCOLOR[l.status]:'var(--blue)'}"></span><div style="flex:1"><b>${esc(l.name)}</b><div class="meta">${esc(l.subject||'')} · ${esc(l.detail||'')}</div></div><span class="meta">${thDateTime(l.at).split(' ').slice(-1)[0]}</span></div>`).join(''):'<p class="meta">ยังไม่มีรายการ</p>'}</div>`;}
+        :`<div class="listcard"><h3>📦 รายชื่อที่ส่งงานแล้ว</h3>${(()=>{const a=DB.assignments.find(x=>x.id===scanAssignId);if(!a)return'<p class="meta">ยังไม่ได้เลือกชิ้นงาน</p>';const subd=studs.filter(s=>a.scores?.[s.id]?.submittedAt);return subd.length?`<p class="meta" style="margin:4px 0 10px">แตะนักเรียนเพื่อยกเลิกการรับงาน (กรณีผิดพลาด)</p><div class="grid">`+subd.map(s=>`<div class="scard locked" onclick="undoWork('${a.id}','${s.id}')"><div class="att present"></div><div class="avatar">${avatarSVG(s.avatar,54)}</div><div class="name">${s.number}. ${esc(s.name.split(' ')[0])}</div><div class="code" style="color:var(--green)">🔒 ส่งแล้ว · แตะลบ</div></div>`).join('')+`</div>`:'<p class="meta">ยังไม่มีใครส่งงาน</p>';})()}</div>`}
 async function markByCode(){const ctx=scanCtx();if(!ctx)return;const code=val('codeIn');if(!code)return;
   const stu=ctx.studs.find(s=>String(s.code)===code);if(!stu){beep(300,.2,'sawtooth');return banner('ไม่พบรหัส '+code+' ในห้องนี้',true);}
   await applyMark(stu,ctx);document.getElementById('codeIn').value='';document.getElementById('codeIn').focus();}
 async function applyMark(stu,ctx,fromCamera){const{sub,cls}=ctx;
   if(scanMode==='att'){
     const k=attKey(scanSubjId,scanDate);stu.attendance=stu.attendance||{};
-    if(fromCamera&&stu.attendance[k]){beep(500,.08);popupSuccess('เช็กไปแล้ว',[`${esc(stu.name)}`,`สถานะ: ${ATTLABEL[stu.attendance[k]]}`]);return;}
+    if(stu.attendance[k]){beep(500,.08);popupSuccess('เช็กไปแล้ว',[`${esc(stu.name)}`,`สถานะ: ${ATTLABEL[stu.attendance[k]]}`,`แตะการ์ดที่ล็อกเพื่อยกเลิก`]);if(!fromCamera)render();return;}
     const {error}=await sb.from('attendance').upsert(
       {student_id:stu.id,subject_id:scanSubjId,date:scanDate,status:'present'},
       {onConflict:'student_id,subject_id,date'});
@@ -1031,7 +1031,7 @@ async function applyMark(stu,ctx,fromCamera){const{sub,cls}=ctx;
     if(!fromCamera)render();
   }else{const a=DB.assignments.find(x=>x.id===scanAssignId);if(!a)return banner('ยังไม่ได้เลือกชิ้นงาน',true);
     a.scores=a.scores||{};a.scores[stu.id]=a.scores[stu.id]||{};
-    if(fromCamera&&a.scores[stu.id].submittedAt){beep(500,.08);popupSuccess('รับงานไปแล้ว',[`${esc(stu.name)}`,`ส่ง: ${esc(a.name)}`]);return;}
+    if(a.scores[stu.id].submittedAt){beep(500,.08);popupSuccess('รับงานไปแล้ว',[`${esc(stu.name)}`,`ส่ง: ${esc(a.name)}`,`แตะรายชื่อด้านล่างเพื่อยกเลิก`]);if(!fromCamera)render();return;}
     const ts=new Date().toISOString();const c=a.scores[stu.id];
     const {error}=await sb.from('scores').upsert(
       {assignment_id:scanAssignId,student_id:stu.id,value:(c.value==null||c.value==='')?null:+c.value,note:c.note||null,submitted_at:ts},
@@ -1043,6 +1043,27 @@ async function applyMark(stu,ctx,fromCamera){const{sub,cls}=ctx;
     popupSuccess('รับงานสำเร็จ',[`รหัส <b>${esc(stu.code||'-')}</b>`,`${esc(stu.name)}`,`ส่ง: ${esc(a.name)}`,thDateTime(new Date().toISOString())]);
     if(!fromCamera)render();}}
 
+async function undoAtt(id){const ctx=scanCtx();if(!ctx)return;
+  const s=DB.students.find(x=>x.id===id);if(!s)return;
+  const k=attKey(scanSubjId,scanDate);const cur=s.attendance?.[k];if(!cur)return;
+  if(!confirm(`ลบการเช็กชื่อของ "${s.name}" (${ATTLABEL[cur]}) วันที่ ${scanDate}?`))return;
+  const {error}=await sb.from('attendance').delete().match({student_id:id,subject_id:scanSubjId,date:scanDate});
+  if(error)return banner('ลบไม่สำเร็จ: '+error.message,true);
+  delete s.attendance[k];
+  logAction({type:'att',name:s.name,classroom:ctx.cls.name,subject:ctx.sub?.name||'',detail:'ยกเลิกการเช็กชื่อ'});
+  render();banner('ยกเลิกการเช็กชื่อแล้ว');}
+async function undoWork(aid,sid){const a=DB.assignments.find(x=>x.id===aid);if(!a)return;const s=DB.students.find(x=>x.id===sid);
+  if(!confirm(`ยกเลิกการรับงานของ "${s?.name||''}"?`))return;
+  const c=a.scores[sid]||{};
+  const {error}=await sb.from('scores').upsert(
+    {assignment_id:aid,student_id:sid,value:(c.value==null||c.value==='')?null:+c.value,note:c.note||null,submitted_at:null},
+    {onConflict:'assignment_id,student_id'});
+  if(error)return banner('ลบไม่สำเร็จ: '+error.message,true);
+  if(a.scores[sid])delete a.scores[sid].submittedAt;
+  logAction({type:'work',name:s?.name||'',classroom:clsById(s?.classroomId)?.name||'',subject:subjById(aid)?.name||'',detail:'ยกเลิกการรับงาน'});
+  render();banner('ยกเลิกการรับงานแล้ว');}
+
+  
 function setManualMode(m){manualMode=m;window._pending.clear();render();}
 function togglePending(id){if(window._pending.has(id))window._pending.delete(id);else window._pending.add(id);render();}
 function clearPending(){window._pending.clear();render();}
