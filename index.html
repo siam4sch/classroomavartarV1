@@ -1209,15 +1209,19 @@ function genQRCard(elId,text){
   const el=document.getElementById(elId);if(!el)return;const v=String(text||'-');
   const fallback=()=>{el.innerHTML=`<div style="font-size:9px;line-height:1.25;text-align:center;word-break:break-all;padding:4px;color:#1f2540;font-weight:600">${esc(v)}</div>`;};
   const draw=()=>{
-    if(window.QRCode&&QRCode.toCanvas){
-      el.innerHTML='';const c=document.createElement('canvas');el.appendChild(c);
-      QRCode.toCanvas(c,v,{width:240,margin:1,errorCorrectionLevel:'M',color:{dark:'#1f2540',light:'#ffffff'}},err=>{if(err)fallback();});
-    }else if(window.QRCode&&QRCode.toDataURL){
-      QRCode.toDataURL(v,{width:240,margin:1,errorCorrectionLevel:'M'},(err,url)=>{if(err){fallback();return;}el.innerHTML=`<img src="${url}">`;});
-    }else fallback();
+    try{
+      if(window.QRCode&&QRCode.toCanvas){
+        el.innerHTML='';const c=document.createElement('canvas');el.appendChild(c);
+        QRCode.toCanvas(c,v,{width:240,margin:1,errorCorrectionLevel:'M',color:{dark:'#1f2540',light:'#ffffff'}},err=>{
+          if(err&&QRCode.toDataURL){QRCode.toDataURL(v,{width:240,margin:1},(e2,url)=>e2?fallback():el.innerHTML=`<img src="${url}">`);}
+          else if(err)fallback();
+        });
+      }else if(window.QRCode&&QRCode.toDataURL){
+        QRCode.toDataURL(v,{width:240,margin:1},(err,url)=>err?fallback():el.innerHTML=`<img src="${url}">`);
+      }else fallback();
+    }catch(e){fallback();}
   };
-  if(qrReady())draw();
-  else ensureQRLib().then(ok=>{if(ok&&document.getElementById(elId))draw();else fallback();});
+  ensureQRLib().then(ok=>{if(!document.getElementById(elId))return;ok?draw():fallback();});
 }
 
 function renderPrint(){setTopActions('');const el=document.getElementById('page-print');const mine=myClassrooms();
