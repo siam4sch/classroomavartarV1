@@ -510,7 +510,7 @@ async function submitForceChange(){
   const p1=val('fcPass'),p2=val('fcPass2');
   if(p1.length<4)return banner('รหัสผ่านอย่างน้อย 4 ตัวอักษร',true);
   if(p1!==p2)return banner('รหัสผ่านยืนยันไม่ตรงกัน',true);
-  if(stu&&validBirth(stu.birthdate)&&p1===stu.birthdate)return banner('ห้ามตั้งรหัสเป็นวันเกิด',true);
+  if(stu&&validBirth(stu.birthdate)&&p1===stu.birthdate)return banner('ห้ามตั้งรหัสเป็นวันเกิด เลือกรหัสใหม่',true);
   const {error}=await sb.auth.updateUser({password:p1});
   if(error)return banner('ตั้งรหัสไม่สำเร็จ: '+error.message,true);
   await sb.from('students').update({must_change:false}).eq('id',session.studentId);
@@ -792,14 +792,16 @@ async function saveStudent(id){
     }else{
     const res=await sb.functions.invoke('provision-student',{
       body:{code,name,birthdate:birth,classroom_id:activeClassId,number}});
-    if(res.error)return banner('สร้างนักเรียนไม่สำเร็จ: '+(res.error.message||''),true);
-    // function คืนแค่ ok จึงดึงแถวที่เพิ่งสร้างกลับมา แล้วเก็บ avatar/points ที่ function ไม่ได้บันทึก
-    const {data:row}=await sb.from('students').select('*').eq('code',code).maybeSingle();
-    if(row){
-      const pts=+val('m_pts')||0;
-      await sb.from('students').update({avatar:window._tmpAvatar,points:pts}).eq('id',row.id);
-      DB.students.push({id:row.id,classroomId:row.classroom_id,number:row.number||'',name:row.name,code:row.code||'',birthdate:row.birthdate||'',points:pts,avatar:window._tmpAvatar,mustChange:true,pw:'',user_id:row.user_id,attendance:{}});
+    if(res.error||!res.data?.ok){
+      const msg=res.data?.error||res.error?.message||'ไม่ทราบสาเหตุ';
+      return banner('สร้างนักเรียนไม่สำเร็จ: '+msg,true);
     }
+    const row=res.data.student;
+    const pts=+val('m_pts')||0;
+    // function ไม่ได้บันทึก avatar/points จึง update เพิ่ม
+    await sb.from('students').update({avatar:window._tmpAvatar,points:pts}).eq('id',row.id);
+    DB.students.push({id:row.id,classroomId:row.classroom_id,number:row.number||'',name:row.name,code:row.code||'',birthdate:row.birthdate||'',points:pts,avatar:window._tmpAvatar,mustChange:true,pw:'',user_id:row.user_id,attendance:{}});
+    logAction({type:'student',detail:'เพิ่มนักเรียน: '+name});
   }
 
 async function delStudent(id){
@@ -1329,7 +1331,8 @@ async function pushSettings(){
 
 /* ---------- SETTINGS ACTIONS ---------- */
 async function changeMyPass(){
-  const p=val('my_pass');if(p.length<4)return banner('รหัสผ่านอย่างน้อย 4 ตัวอักษร',true);
+  const p=val('my_pass');if(!p)return banner('กรอกรหัสผ่านใหม่',true);
+  if(p.length<4)return banner('รหัสผ่านอย่างน้อย 4 ตัวอักษร',true);
   const {error}=await sb.auth.updateUser({password:p});
   if(error)return banner('เปลี่ยนรหัสไม่สำเร็จ: '+error.message,true);
   const f=document.getElementById('my_pass');if(f)f.value='';banner('เปลี่ยนรหัสผ่านแล้ว');
