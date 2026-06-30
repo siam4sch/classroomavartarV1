@@ -276,6 +276,7 @@ const SB_ANON='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJl
 const sb=window.supabase.createClient(SB_URL,SB_ANON,{auth:{persistSession:true}});
 let DB=load();
 let session=null;
+let settingsRowId=1;
 
 function blankDB(){return{
   systemName:'ระบบเช็กชื่อห้องเรียน',logo:'',school:'โรงเรียนตัวอย่าง',
@@ -441,7 +442,7 @@ async function loadFromSupabase(){
 
   // settings
   const st=(rSet.data||[])[0];
-  if(st){DB.systemName=st.system_name||'ระบบเช็กชื่อห้องเรียน';DB.logo=st.logo||'';DB.school=st.school||'';DB.weights=st.weights||{during:70,final:30};}
+  if(st){settingsRowId=st.id;DB.systemName=st.system_name||'ระบบเช็กชื่อห้องเรียน';DB.logo=st.logo||'';DB.school=st.school||'';DB.weights=st.weights||{during:70,final:30};}
 
   // users
   DB.users=(rProf.data||[]).map(p=>({id:p.id,username:p.username,name:p.name,role:p.role,active:p.active}));
@@ -1012,36 +1013,50 @@ function renderScan(){setTopActions('');const el=document.getElementById('page-s
         <div class="savebar"><button class="btn green" ${window._pending.size?'':'disabled'} onclick="commitManual()">💾 บันทึก ${ATTLABEL[manualMode]} (${window._pending.size} คน)</button>${window._pending.size?`<button class="btn gray" onclick="clearPending()">ล้าง</button>`:''}</div>`
         :`<p class="meta">ห้องนี้ยังไม่มีนักเรียน</p>`}</div>`:''}
     <div class="listcard"><h3>🕒 ประวัติล่าสุด</h3>${recent.length?recent.map(l=>`<div class="logrow"><span class="ld" style="background:${l.status?ATTCOLOR[l.status]:'var(--blue)'}"></span><div style="flex:1"><b>${esc(l.name)}</b><div class="meta">${esc(l.subject||'')} · ${esc(l.detail||'')}</div></div><span class="meta">${thDateTime(l.at).split(' ').slice(-1)[0]}</span></div>`).join(''):'<p class="meta">ยังไม่มีรายการ</p>'}</div>`;}
-function markByCode(){const ctx=scanCtx();if(!ctx)return;const code=val('codeIn');if(!code)return;
+async function markByCode(){const ctx=scanCtx();if(!ctx)return;const code=val('codeIn');if(!code)return;
   const stu=ctx.studs.find(s=>String(s.code)===code);if(!stu){beep(300,.2,'sawtooth');return banner('ไม่พบรหัส '+code+' ในห้องนี้',true);}
-  applyMark(stu,ctx);document.getElementById('codeIn').value='';document.getElementById('codeIn').focus();}
-function applyMark(stu,ctx,fromCamera){const{sub,cls}=ctx;
+  await applyMark(stu,ctx);document.getElementById('codeIn').value='';document.getElementById('codeIn').focus();}
+async function applyMark(stu,ctx,fromCamera){const{sub,cls}=ctx;
   if(scanMode==='att'){
     const k=attKey(scanSubjId,scanDate);stu.attendance=stu.attendance||{};
-    if(fromCamera&&stu.attendance[k]){beep(500,.08);popupSuccess('เช็กไปแล้ว',[`${esc(stu.name)}`,`สถานะ: ${ATTLABEL[stu.attendance[k]]}`],1500);return;}
+    if(fromCamera&&stu.attendance[k]){beep(500,.08);popupSuccess('เช็กไปแล้ว',[`${esc(stu.name)}`,`สถานะ: ${ATTLABEL[stu.attendance[k]]}`]);return;}
+    const {error}=await sb.from('attendance').upsert(
+      {student_id:stu.id,subject_id:scanSubjId,date:scanDate,status:'present'},
+      {onConflict:'student_id,subject_id,date'});
+    if(error){beep(300,.2,'sawtooth');return banner('บันทึกไม่สำเร็จ: '+error.message,true);}
     stu.attendance[k]='present';
     logAction({type:'att',name:stu.name,classroom:cls.name,subject:sub?.name||'',status:'present',detail:'มาเรียน'});
-    save();soundOK();
+    soundOK();
     popupSuccess('บันทึกสำเร็จ',[`รหัส <b>${esc(stu.code||'-')}</b>`,`${esc(stu.name)}`,`${esc(cls.name)} · ${esc(sub?.name||'')}`,thDateTime(new Date().toISOString())]);
     if(!fromCamera)render();
   }else{const a=DB.assignments.find(x=>x.id===scanAssignId);if(!a)return banner('ยังไม่ได้เลือกชิ้นงาน',true);
     a.scores=a.scores||{};a.scores[stu.id]=a.scores[stu.id]||{};
-    if(fromCamera&&a.scores[stu.id].submittedAt){beep(500,.08);popupSuccess('รับงานไปแล้ว',[`${esc(stu.name)}`,`ส่ง: ${esc(a.name)}`],1500);return;}
-    a.scores[stu.id].submittedAt=new Date().toISOString();
+    if(fromCamera&&a.scores[stu.id].submittedAt){beep(500,.08);popupSuccess('รับงานไปแล้ว',[`${esc(stu.name)}`,`ส่ง: ${esc(a.name)}`]);return;}
+    const ts=new Date().toISOString();const c=a.scores[stu.id];
+    const {error}=await sb.from('scores').upsert(
+      {assignment_id:scanAssignId,student_id:stu.id,value:(c.value==null||c.value==='')?null:+c.value,note:c.note||null,submitted_at:ts},
+      {onConflict:'assignment_id,student_id'});
+    if(error){beep(300,.2,'sawtooth');return banner('บันทึกไม่สำเร็จ: '+error.message,true);}
+    a.scores[stu.id].submittedAt=ts;
     logAction({type:'work',name:stu.name,classroom:cls.name,subject:sub?.name||'',detail:'ส่งงาน: '+a.name});
-    save();soundOK();
+    soundOK();
     popupSuccess('รับงานสำเร็จ',[`รหัส <b>${esc(stu.code||'-')}</b>`,`${esc(stu.name)}`,`ส่ง: ${esc(a.name)}`,thDateTime(new Date().toISOString())]);
     if(!fromCamera)render();}}
 
 function setManualMode(m){manualMode=m;window._pending.clear();render();}
 function togglePending(id){if(window._pending.has(id))window._pending.delete(id);else window._pending.add(id);render();}
 function clearPending(){window._pending.clear();render();}
-function commitManual(){const ctx=scanCtx();if(!ctx||!window._pending.size)return;
+async function commitManual(){const ctx=scanCtx();if(!ctx||!window._pending.size)return;
   const ids=[...window._pending];
   if(!confirm(`บันทึกสถานะ "${ATTLABEL[manualMode]}" ให้นักเรียน ${ids.length} คน?\n(เมื่อบันทึกแล้วจะล็อก เช็กซ้ำไม่ได้)`))return;
-  const k=attKey(scanSubjId,scanDate);let n=0;
-  ids.forEach(id=>{const s=DB.students.find(x=>x.id===id);if(!s)return;s.attendance=s.attendance||{};if(s.attendance[k])return;s.attendance[k]=manualMode;logAction({type:'att',name:s.name,classroom:ctx.cls.name,subject:ctx.sub?.name||'',status:manualMode,detail:ATTLABEL[manualMode]});n++;});
-  window._pending.clear();save();render();soundDone();banner(`บันทึก "${ATTLABEL[manualMode]}" ${n} คนเรียบร้อย`);}
+  const k=attKey(scanSubjId,scanDate);const rows=[],marked=[];
+  ids.forEach(id=>{const s=DB.students.find(x=>x.id===id);if(!s)return;s.attendance=s.attendance||{};if(s.attendance[k])return;
+    rows.push({student_id:id,subject_id:scanSubjId,date:scanDate,status:manualMode});marked.push(s);});
+  if(!rows.length){window._pending.clear();render();return;}
+  const {error}=await sb.from('attendance').upsert(rows,{onConflict:'student_id,subject_id,date'});
+  if(error)return banner('บันทึกไม่สำเร็จ: '+error.message,true);
+  marked.forEach(s=>{s.attendance[k]=manualMode;logAction({type:'att',name:s.name,classroom:ctx.cls.name,subject:ctx.sub?.name||'',status:manualMode,detail:ATTLABEL[manualMode]});});
+  window._pending.clear();render();soundDone();banner(`บันทึก "${ATTLABEL[manualMode]}" ${marked.length} คนเรียบร้อย`);}
 
 /* ============================================================
    RANKING
@@ -1236,7 +1251,7 @@ function renderSettings(){setTopActions('');const el=document.getElementById('pa
       <label class="fl">ชื่อโรงเรียน</label><input id="g_school" value="${esc(DB.school)}">
       <label class="fl">โลโก้ (URL)</label><input id="g_logourl" value="${DB.logo&&/^https?:/.test(DB.logo)?esc(DB.logo):''}" placeholder="https://...logo.png">
       <label class="fl">หรืออัปโหลดจากเครื่อง</label><input type="file" accept="image/*" id="g_logofile">
-      <div class="row"><button class="btn" onclick="saveBrand()">บันทึกแบรนด์</button><button class="btn gray" onclick="DB.logo='';save();render();banner('ลบโลโก้แล้ว')">ลบโลโก้</button></div></div>
+      <div class="row"><button class="btn" onclick="saveBrand()">บันทึกแบรนด์</button><button class="btn gray" onclick="DB.logo='';pushSettings();render();banner('ลบโลโก้แล้ว')">ลบโลโก้</button></div></div>
     <div class="listcard"><h3>⚖️ น้ำหนักการตัดเกรด <span class="pill admin">admin</span></h3>
       <div class="row" style="margin-bottom:8px"><button class="btn sm gray" onclick="setPreset(70,30)">70/30</button><button class="btn sm gray" onclick="setPreset(60,40)">60/40</button><button class="btn sm gray" onclick="setPreset(80,20)">80/20</button></div>
       <div class="row"><div style="flex:1"><label class="fl">ระหว่างเรียน %</label><input type="number" id="w_during" value="${w.during}"></div><div style="flex:1"><label class="fl">ปลายภาค %</label><input type="number" id="w_final" value="${w.final}"></div></div>
@@ -1248,6 +1263,13 @@ function renderSettings(){setTopActions('');const el=document.getElementById('pa
       <div class="row"><button class="btn sm gray" onclick="exportCSV()">ส่งออก CSV</button><button class="btn sm gray" onclick="exportJSON()">สำรองข้อมูล (JSON)</button><button class="btn sm gray" onclick="DB.logs=[];save();render();banner('ล้างประวัติแล้ว')">ล้างประวัติ</button><button class="btn sm red" onclick="resetAll()">⚠️ ล้างข้อมูลทั้งหมด</button></div></div>
       <div class="listcard"><h3>🔐 หมายเหตุความปลอดภัย</h3><p class="meta">รุ่นนี้เก็บข้อมูลและรหัสผ่าน (แฮช SHA-256) ไว้ใน localStorage ของเบราว์เซอร์ เหมาะกับเครื่องเดียวหรือการทดสอบ นักเรียนเข้าครั้งแรกด้วยวันเกิดแล้วถูกบังคับตั้งรหัสส่วนตัวใหม่ ครูรีเซ็ตได้เมื่อนักเรียนลืม เมื่อย้ายไปใช้งานจริงหลายเครื่องควรต่อกับเซิร์ฟเวอร์/ฐานข้อมูลและใช้ HTTPS</p></div>`;}
 
+async function pushSettings(){
+  const {error}=await sb.from('settings').upsert(
+    {id:settingsRowId,system_name:DB.systemName,logo:DB.logo,school:DB.school,weights:DB.weights},
+    {onConflict:'id'});
+  if(error)banner('บันทึกการตั้งค่าไม่สำเร็จ: '+error.message,true);
+}
+
 /* ---------- SETTINGS ACTIONS ---------- */
 function changeMyPass(){const p=val('my_pass');if(!p)return banner('กรอกรหัสผ่านใหม่',true);
   if(p.length<4)return banner('รหัสผ่านอย่างน้อย 4 ตัวอักษร',true);
@@ -1257,14 +1279,14 @@ function changeMyPass(){const p=val('my_pass');if(!p)return banner('กรอก
 function saveBrand(){if(!isAdmin())return;
   DB.systemName=val('g_sysname')||'ระบบเช็กชื่อห้องเรียน';DB.school=val('g_school')||'';
   const url=val('g_logourl');const file=document.getElementById('g_logofile')?.files?.[0];
-  const done=()=>{logAction({type:'system',detail:'แก้ไขแบรนด์ระบบ'});save();render();renderLoginBrand();banner('บันทึกแบรนด์แล้ว');};
+  const done=async()=>{await pushSettings();logAction({type:'system',detail:'แก้ไขแบรนด์ระบบ'});render();renderLoginBrand();banner('บันทึกแบรนด์แล้ว');};
   if(file){if(file.size>800*1024)return banner('ไฟล์โลโก้ใหญ่เกินไป (จำกัด ~800KB)',true);
     const r=new FileReader();r.onload=()=>{DB.logo=r.result;done();};r.readAsDataURL(file);}
   else{if(url)DB.logo=url;done();}}
 function setPreset(d,f){const a=document.getElementById('w_during'),b=document.getElementById('w_final');if(a)a.value=d;if(b)b.value=f;}
 function saveWeights(){if(!isAdmin())return;const d=+val('w_during')||0,f=+val('w_final')||0;
   if(d+f!==100)if(!confirm('น้ำหนักรวมไม่เท่ากับ 100% ('+(d+f)+'%) ต้องการบันทึกต่อหรือไม่?'))return;
-  DB.weights={during:d,final:f};logAction({type:'system',detail:`ปรับน้ำหนักเกรด ${d}/${f}`});save();render();banner('บันทึกน้ำหนักการตัดเกรดแล้ว');}
+  DB.weights={during:d,final:f};pushSettings();logAction({type:'system',detail:`ปรับน้ำหนักเกรด ${d}/${f}`});render();banner('บันทึกน้ำหนักการตัดเกรดแล้ว');}
 function resetAll(){if(!isAdmin())return;
   if(!confirm('⚠️ ล้างข้อมูลทั้งหมด?\nนักเรียน ห้องเรียน รายวิชา คะแนน บัญชี และประวัติทั้งหมดจะถูกลบถาวร แล้วระบบจะรีเซ็ตเป็นค่าเริ่มต้น (admin/admin)\nแนะนำให้สำรอง JSON ไว้ก่อน'))return;
   if(!confirm('ยืนยันอีกครั้ง — การกระทำนี้ย้อนกลับไม่ได้'))return;
