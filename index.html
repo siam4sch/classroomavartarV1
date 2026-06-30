@@ -803,6 +803,8 @@ async function saveStudent(id){
     DB.students.push({id:row.id,classroomId:row.classroom_id,number:row.number||'',name:row.name,code:row.code||'',birthdate:row.birthdate||'',points:pts,avatar:window._tmpAvatar,mustChange:true,pw:'',user_id:row.user_id,attendance:{}});
     logAction({type:'student',detail:'เพิ่มนักเรียน: '+name});
   }
+  closeModal();render();banner('บันทึกข้อมูลนักเรียนแล้ว');
+}
 
 async function delStudent(id){
   if(!confirm('ลบนักเรียนคนนี้?'))return;
