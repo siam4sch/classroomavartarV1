@@ -1001,7 +1001,7 @@ function renderScan(){setTopActions('');const el=document.getElementById('page-s
     ?`<div class="grid">${studs.map(s=>{const done=s.attendance?.[attKey(scanSubjId,scanDate)]||'';const picked=window._pending.has(s.id);
         return`<div class="scard ${picked?'picked':''} ${done?'locked':''}" onclick="${done?`undoAtt('${s.id}')`:`togglePending('${s.id}')`}">${done?`<div class="att ${done}"></div>`:picked?`<div class="pick">✓</div>`:''}<div class="avatar">${avatarSVG(s.avatar,54)}</div><div class="name">${s.number}. ${esc(s.name.split(' ')[0])}</div><div class="code" style="color:${done?ATTCOLOR[done]:picked?'var(--blue)':'var(--label)'}">${done?'🔒 '+ATTLABEL[done]+' · แตะลบ':picked?'✓ เลือกแล้ว':'แตะเพื่อเลือก'}</div></div>`;
       }).join('')}</div>
-      <div class="savebar"><button class="btn green" ${window._pending.size?'':'disabled'} onclick="commitManual()">💾 บันทึก ${ATTLABEL[manualMode]} (${window._pending.size} คน)</button>${window._pending.size?`<button class="btn gray" onclick="clearPending()">ล้าง</button>`:''}</div>
+      <div class="savebar"><button class="btn green" ${window._pending.size?'':'disabled'} onclick="commitManual()">💾 บันทึก ${ATTLABEL[manualMode]} (${window._pending.size} คน)</button>${window._pending.size?`<button class="btn gray" onclick="clearPending()">ล้าง</button>`:''}</div>`
     :`<p class="meta">ห้องนี้ยังไม่มีนักเรียน</p>`;
 
   const workBlock=(()=>{const a=DB.assignments.find(x=>x.id===scanAssignId);if(!a)return'<p class="meta">ยังไม่ได้เลือกชิ้นงาน</p>';
