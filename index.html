@@ -415,12 +415,15 @@ async function afterAuth(user){
   if(prof){
     if(!prof.active){await sb.auth.signOut();return banner('บัญชีถูกระงับ',true);}
     session={id:prof.id,role:prof.role,name:prof.name,username:prof.username,active:true};
-    banner('กำลังโหลดข้อมูล...');
-    await loadFromSupabase();
-    soundOK();enterApp();return;
+    banner('กำลังโหลดข้อมูล...');await loadFromSupabase();soundOK();enterApp();return;
   }
-  banner('บัญชีนักเรียนจะเปิดใช้ในขั้นตอนถัดไป',true);
-  await sb.auth.signOut();
+  // ไม่มี profile = นักเรียน หาแถวจาก user_id
+  const {data:stu}=await sb.from('students').select('*').eq('user_id',user.id).maybeSingle();
+  if(stu){
+    session={id:'stu_'+stu.id,role:'student',name:stu.name,studentId:stu.id,username:stu.code};
+    banner('กำลังโหลดข้อมูล...');await loadFromSupabase();soundOK();enterApp();return;
+  }
+  await sb.auth.signOut();banner('ไม่พบบัญชีนี้ในระบบ',true);
 }
 async function loadFromSupabase(){
   const [rSet,rProf,rCls,rStu,rSubj,rSubCls,rAsg,rScore,rAtt,rLog]=await Promise.all([
@@ -503,15 +506,20 @@ function showForceChange(){const stu=DB.students.find(s=>s.id===session.studentI
   document.getElementById('fcName').textContent=`สวัสดี ${stu?.name||''} · กรุณาตั้งรหัสผ่านส่วนตัวก่อนใช้งาน`;
   document.getElementById('fcPass').value='';document.getElementById('fcPass2').value='';
   document.getElementById('forceScreen').classList.remove('hidden');}
-async function submitForceChange(){const stu=DB.students.find(s=>s.id===session.studentId);if(!stu)return logout();
+async function submitForceChange(){
+  const stu=DB.students.find(s=>s.id===session.studentId);
   const p1=val('fcPass'),p2=val('fcPass2');
   if(p1.length<4)return banner('รหัสผ่านอย่างน้อย 4 ตัวอักษร',true);
   if(p1!==p2)return banner('รหัสผ่านยืนยันไม่ตรงกัน',true);
-  if(validBirth(stu.birthdate)&&p1===stu.birthdate)return banner('ห้ามตั้งรหัสเป็นวันเกิด เลือกรหัสใหม่',true);
-  stu.pw=await sha256(p1);stu.mustChange=false;
-  logAction({type:'student',detail:'นักเรียนตั้งรหัสผ่านใหม่',byName:stu.name});save();
-  document.getElementById('forceScreen').classList.add('hidden');soundOK();banner('ตั้งรหัสผ่านเรียบร้อย');
-  enterApp();}
+  if(stu&&validBirth(stu.birthdate)&&p1===stu.birthdate)return banner('ห้ามตั้งรหัสเป็นวันเกิด',true);
+  const {error}=await sb.auth.updateUser({password:p1});
+  if(error)return banner('ตั้งรหัสไม่สำเร็จ: '+error.message,true);
+  await sb.from('students').update({must_change:false}).eq('id',session.studentId);
+  if(stu)stu.mustChange=false;
+  document.getElementById('forceScreen').classList.add('hidden');soundOK();banner('ตั้งรหัสผ่านเรียบร้อย');enterApp();
+}
+
+
   
 const TAB_DEF={
   users:['ผู้ใช้','<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.4" fill="#fff"/><path d="M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5z" fill="#fff"/><circle cx="17" cy="8.5" r="2.6" fill="#fff" opacity=".7"/><path d="M15 14.6c2.6.1 5 1.8 5 4.4h-5.2" fill="#fff" opacity=".7"/></svg>','var(--gRed)'],
@@ -782,13 +790,18 @@ async function saveStudent(id){
     const {error}=await sb.from('students').update(row).eq('id',id);
     if(error)return banner('บันทึกไม่สำเร็จ: '+error.message,true);
     Object.assign(DB.students.find(x=>x.id===id),{number,name,code,birthdate:birth,points:row.points,avatar:row.avatar});
-  }else{
-    const {data,error}=await sb.from('students').insert({...row,classroom_id:activeClassId,must_change:true}).select().single();
-    if(error)return banner('บันทึกไม่สำเร็จ: '+error.message,true);
-    DB.students.push({id:data.id,classroomId:data.classroom_id,number:data.number||'',name:data.name,code:data.code||'',birthdate:data.birthdate||'',points:data.points||0,avatar:data.avatar||row.avatar,mustChange:true,pw:'',user_id:null,attendance:{}});
+    }else{
+    const res=await sb.functions.invoke('provision-student',{
+      body:{code,name,birthdate:birth,classroom_id:activeClassId,number}});
+    if(res.error)return banner('สร้างนักเรียนไม่สำเร็จ: '+(res.error.message||''),true);
+    // function คืนแค่ ok จึงดึงแถวที่เพิ่งสร้างกลับมา แล้วเก็บ avatar/points ที่ function ไม่ได้บันทึก
+    const {data:row}=await sb.from('students').select('*').eq('code',code).maybeSingle();
+    if(row){
+      const pts=+val('m_pts')||0;
+      await sb.from('students').update({avatar:window._tmpAvatar,points:pts}).eq('id',row.id);
+      DB.students.push({id:row.id,classroomId:row.classroom_id,number:row.number||'',name:row.name,code:row.code||'',birthdate:row.birthdate||'',points:pts,avatar:window._tmpAvatar,mustChange:true,pw:'',user_id:row.user_id,attendance:{}});
+    }
   }
-  closeModal();render();banner('บันทึกข้อมูลนักเรียนแล้ว');
-}
 
 async function delStudent(id){
   if(!confirm('ลบนักเรียนคนนี้?'))return;
@@ -1239,10 +1252,16 @@ function renderPortal(){const el=document.getElementById('page-portal');
     <div class="listcard"><h3>📅 สรุปการเข้าเรียน</h3><div class="meta" style="margin-bottom:8px">จากทั้งหมด ${at.tot} ครั้ง</div><div class="row"><span class="pill" style="background:#eafbf0;color:#16a34a">มา ${at.p}</span><span class="pill" style="background:#fff3e0;color:#e07a00">สาย ${at.l}</span><span class="pill" style="background:#ffe9e9;color:var(--red)">ขาด ${at.a}</span><span class="pill" style="background:#f3eafe;color:var(--purple)">หนี ${at.k}</span></div></div>
     <div class="listcard"><h3>📊 คะแนนรายวิชา</h3>${subjRows}</div>
     <div class="listcard"><h3>🔑 รหัสผ่านของฉัน</h3><label class="fl" style="margin-top:6px">เปลี่ยนรหัสผ่าน</label><input id="stu_pass" type="password" placeholder="รหัสใหม่ (อย่างน้อย 4 ตัว)"><button class="btn sm" onclick="studentChangePass()">บันทึกรหัสผ่าน</button><p class="meta" style="margin-top:8px">หากลืมรหัส ติดต่อครูประจำวิชาเพื่อรีเซ็ต</p></div>`;}
-async function studentChangePass(){const stu=DB.students.find(s=>s.id===session.studentId);if(!stu)return;
+async function studentChangePass(){
+  const stu=DB.students.find(s=>s.id===session.studentId);if(!stu)return;
   const p=val('stu_pass');if(p.length<4)return banner('รหัสผ่านอย่างน้อย 4 ตัว',true);
   if(validBirth(stu.birthdate)&&p===stu.birthdate)return banner('ห้ามใช้วันเกิดเป็นรหัส',true);
-  stu.pw=await sha256(p);stu.mustChange=false;save();document.getElementById('stu_pass').value='';banner('เปลี่ยนรหัสผ่านแล้ว');}
+  const {error}=await sb.auth.updateUser({password:p});
+  if(error)return banner('เปลี่ยนรหัสไม่สำเร็จ: '+error.message,true);
+  await sb.from('students').update({must_change:false}).eq('id',stu.id);
+  stu.mustChange=false;document.getElementById('stu_pass').value='';banner('เปลี่ยนรหัสผ่านแล้ว');
+}
+
 
 /* ============================================================
    TOOLS
@@ -1310,11 +1329,12 @@ async function pushSettings(){
 }
 
 /* ---------- SETTINGS ACTIONS ---------- */
-function changeMyPass(){const p=val('my_pass');if(!p)return banner('กรอกรหัสผ่านใหม่',true);
-  if(p.length<4)return banner('รหัสผ่านอย่างน้อย 4 ตัวอักษร',true);
-  sha256(p).then(h=>{const me=userById(session.id);me.password=h;session.password=h;
-    logAction({type:'user',detail:'เปลี่ยนรหัสผ่านบัญชีตนเอง'});save();
-    const f=document.getElementById('my_pass');if(f)f.value='';banner('เปลี่ยนรหัสผ่านแล้ว');});}
+async function changeMyPass(){
+  const p=val('my_pass');if(p.length<4)return banner('รหัสผ่านอย่างน้อย 4 ตัวอักษร',true);
+  const {error}=await sb.auth.updateUser({password:p});
+  if(error)return banner('เปลี่ยนรหัสไม่สำเร็จ: '+error.message,true);
+  const f=document.getElementById('my_pass');if(f)f.value='';banner('เปลี่ยนรหัสผ่านแล้ว');
+}
 function saveBrand(){if(!isAdmin())return;
   DB.systemName=val('g_sysname')||'ระบบเช็กชื่อห้องเรียน';DB.school=val('g_school')||'';
   const url=val('g_logourl');const file=document.getElementById('g_logofile')?.files?.[0];
