@@ -844,25 +844,40 @@ async function doImport(){
   if(!activeClassId)return banner('เลือกชั้นเรียนก่อน',true);
   const lines=val('csvIn').trim().split(/\r?\n/).filter(Boolean);
   const seen=new Set(DB.students.map(s=>String(s.code||'')).filter(Boolean));
-  const rows=[];let dup=0,bad=0,noCode=0;
+  const queue=[];let dup=0,bad=0,noCode=0;
   lines.forEach(line=>{
     const cols=line.split(',').map(x=>x?.trim());
     const no=cols[0],name=cols[1],code=cols[2]||'',birth=cols[3]||'';
     if(!name)return;
-    if(!code){noCode++;return;}                 // ไม่มีรหัส = ข้าม
-    if(seen.has(code)){dup++;return;}            // รหัสซ้ำ = ข้าม
+    if(!code){noCode++;return;}
+    if(seen.has(code)){dup++;return;}
     seen.add(code);
     const okBirth=validBirth(birth);if(birth&&!okBirth)bad++;
-    rows.push({classroom_id:activeClassId,number:no||'',name,code,birthdate:okBirth?birth:'',points:0,must_change:true,avatar:defaultAvatar(code||name)});
+    queue.push({number:no||'',name,code,birthdate:okBirth?birth:''});
   });
-  if(!rows.length)return banner(`ไม่มีรายการนำเข้า${noCode?` · ไม่มีรหัส ${noCode}`:''}${dup?` · รหัสซ้ำ ${dup}`:''}`,true);
-  const {data,error}=await sb.from('students').insert(rows).select();
-  if(error)return banner('นำเข้าไม่สำเร็จ: '+error.message,true);
-  (data||[]).forEach(d=>DB.students.push({id:d.id,classroomId:d.classroom_id,number:d.number||'',name:d.name,code:d.code||'',birthdate:d.birthdate||'',points:d.points||0,avatar:d.avatar||defaultAvatar(d.code||d.name),mustChange:true,pw:'',user_id:null,attendance:{}}));
-  logAction({type:'student',detail:`นำเข้า CSV ${data.length} คน`});
+  if(!queue.length)return banner(`ไม่มีรายการนำเข้า${noCode?` · ไม่มีรหัส ${noCode}`:''}${dup?` · รหัสซ้ำ ${dup}`:''}`,true);
+
+  // วันเกิดใช้เป็นรหัสผ่าน ต้องมีและถูกรูปแบบ ไม่งั้น auth สร้างไม่ได้
+  const noBirth=queue.filter(r=>!validBirth(r.birthdate));
+  if(noBirth.length&&!confirm(`มี ${noBirth.length} คนที่ไม่มีวันเกิดถูกต้อง จะสร้างบัญชีเข้าระบบไม่ได้ ระบบจะข้ามคนเหล่านี้\nดำเนินการต่อกับที่เหลือ ${queue.length-noBirth.length} คน?`))return;
+  const valid=queue.filter(r=>validBirth(r.birthdate));
+  if(!valid.length)return banner('ไม่มีแถวที่มีวันเกิดถูกต้อง นำเข้าไม่ได้',true);
+
+  banner(`กำลังนำเข้า ${valid.length} คน...`);
+  let ok=0,fail=0;const failNames=[];
+  for(const r of valid){
+    const res=await sb.functions.invoke('provision-student',{
+      body:{code:r.code,name:r.name,birthdate:r.birthdate,classroom_id:activeClassId,number:r.number}});
+    if(res.error||!res.data?.ok){fail++;failNames.push(r.name);continue;}
+    const c=res.data.student;
+    DB.students.push({id:c.id,classroomId:c.classroom_id,number:c.number||'',name:c.name,code:c.code||'',birthdate:c.birthdate||'',points:0,avatar:defaultAvatar(c.code||c.name),mustChange:true,pw:'',user_id:c.user_id,attendance:{}});
+    ok++;
+  }
+  if(ok)logAction({type:'student',detail:`นำเข้า CSV ${ok} คน`});
   closeModal();render();
-  banner(`นำเข้า ${data.length} คน${dup?` · รหัสซ้ำข้าม ${dup}`:''}${noCode?` · ไม่มีรหัสข้าม ${noCode}`:''}${bad?` · วันเกิดผิดรูป ${bad}`:''}`,dup>0||bad>0||noCode>0);
+  banner(`นำเข้าสำเร็จ ${ok} คน${fail?` · ล้มเหลว ${fail} (${failNames.slice(0,3).join(', ')}${failNames.length>3?'...':''})`:''}${dup?` · ซ้ำข้าม ${dup}`:''}${noCode?` · ไม่มีรหัสข้าม ${noCode}`:''}`,fail>0||dup>0||noCode>0);
 }
+  
 /* ---------- SUBJECT ---------- */
 function renderSchedRows(){const sch=window._tmpSchedule||[];
   return sch.map((r,i)=>`<div class="row" style="margin-bottom:8px"><select style="margin:0;flex:1" onchange="window._tmpSchedule[${i}].day=this.value">${['จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์'].map(d=>`<option ${r.day===d?'selected':''}>${d}</option>`).join('')}</select>
