@@ -984,6 +984,46 @@ function stopScanner(){
   try{s.stop().then(()=>s.clear()).catch(()=>{});}catch(e){}
 }
 
+async function applyMark(stu,ctx,isScan){
+  if(scanMode==='att'){
+    const k=attKey(scanSubjId,scanDate);
+    stu.attendance=stu.attendance||{};
+    if(stu.attendance[k]){beep(300,.2,'sawtooth');return banner(`${stu.name} เช็กชื่อแล้ว (${ATTLABEL[stu.attendance[k]]})`,true);}
+    const {error}=await sb.from('attendance').upsert(
+      {student_id:stu.id,subject_id:scanSubjId,date:scanDate,status:manualMode},
+      {onConflict:'student_id,subject_id,date'});
+    if(error)return banner('บันทึกไม่สำเร็จ: '+error.message,true);
+    stu.attendance[k]=manualMode;
+    logAction({type:'att',name:stu.name,classroom:ctx.cls.name,subject:ctx.sub?.name||'',status:manualMode,detail:ATTLABEL[manualMode]});
+    soundOK();banner(`${stu.name} · ${ATTLABEL[manualMode]}`);
+    if(!isScan)render();
+  }else{
+    const a=DB.assignments.find(x=>x.id===scanAssignId);
+    if(!a)return banner('ยังไม่ได้เลือกชิ้นงาน',true);
+    a.scores=a.scores||{};a.scores[stu.id]=a.scores[stu.id]||{};
+    if(a.scores[stu.id].submittedAt){beep(300,.2,'sawtooth');return banner(`${stu.name} ส่งงานนี้แล้ว`,true);}
+    const c=a.scores[stu.id];const now=new Date().toISOString();
+    const {error}=await sb.from('scores').upsert(
+      {assignment_id:a.id,student_id:stu.id,value:(c.value==null||c.value==='')?null:+c.value,note:c.note||null,submitted_at:now},
+      {onConflict:'assignment_id,student_id'});
+    if(error)return banner('บันทึกไม่สำเร็จ: '+error.message,true);
+    a.scores[stu.id].submittedAt=now;
+    logAction({type:'work',name:stu.name,classroom:ctx.cls.name,subject:ctx.sub?.name||'',detail:'รับงาน: '+a.name});
+    soundOK();banner(`${stu.name} · ส่งงานแล้ว`);
+    if(!isScan)render();
+  }
+}
+
+function markByCode(){
+  const ctx=scanCtx();if(!ctx||!ctx.cls)return banner('เลือกห้องและรายวิชาก่อน',true);
+  const inp=document.getElementById('codeIn');const code=(inp?.value||'').trim();
+  if(!code)return;
+  const stu=ctx.studs.find(s=>String(s.code)===code);
+  if(!stu){beep(300,.2,'sawtooth');return banner('ไม่พบรหัส '+code+' ในห้องนี้',true);}
+  if(inp)inp.value='';
+  applyMark(stu,ctx,false);
+}
+
 function renderScan(){setTopActions('');const el=document.getElementById('page-scan');const ctx=scanCtx();
   if(!ctx||!ctx.cls){el.innerHTML=`<div class="empty"><div class="big">📚</div>ยังไม่มีรายวิชา<br>สร้างห้องและรายวิชาก่อน<br><button class="btn" onclick="go('class')">ไปหน้าชั้นเรียน</button></div>`;return;}
   const{sub,cls,clsIds,studs}=ctx;activeClassId=cls.id;const asgs=subjAssign(scanSubjId);
