@@ -784,23 +784,22 @@ async function saveStudent(id){
   const dupNo=number&&DB.students.find(s=>s.id!==id&&s.classroomId===activeClassId&&String(s.number)===String(number));
   if(dupNo&&!confirm(`เลขที่ ${number} มีอยู่แล้ว (${dupNo.name})\nต้องการใช้เลขที่ซ้ำหรือไม่?`))return;
 
-  const row={number,name,code,birthdate:birth,points:+val('m_pts')||0,avatar:window._tmpAvatar};
   if(id){
+    const row={number,name,code,birthdate:birth,points:+val('m_pts')||0,avatar:window._tmpAvatar};
     const {error}=await sb.from('students').update(row).eq('id',id);
     if(error)return banner('บันทึกไม่สำเร็จ: '+error.message,true);
     Object.assign(DB.students.find(x=>x.id===id),{number,name,code,birthdate:birth,points:row.points,avatar:row.avatar});
-    }else{
+  }else{
     const res=await sb.functions.invoke('provision-student',{
       body:{code,name,birthdate:birth,classroom_id:activeClassId,number}});
     if(res.error||!res.data?.ok){
       const msg=res.data?.error||res.error?.message||'ไม่ทราบสาเหตุ';
       return banner('สร้างนักเรียนไม่สำเร็จ: '+msg,true);
     }
-    const row=res.data.student;
+    const created=res.data.student;
     const pts=+val('m_pts')||0;
-    // function ไม่ได้บันทึก avatar/points จึง update เพิ่ม
-    await sb.from('students').update({avatar:window._tmpAvatar,points:pts}).eq('id',row.id);
-    DB.students.push({id:row.id,classroomId:row.classroom_id,number:row.number||'',name:row.name,code:row.code||'',birthdate:row.birthdate||'',points:pts,avatar:window._tmpAvatar,mustChange:true,pw:'',user_id:row.user_id,attendance:{}});
+    await sb.from('students').update({avatar:window._tmpAvatar,points:pts}).eq('id',created.id);
+    DB.students.push({id:created.id,classroomId:created.classroom_id,number:created.number||'',name:created.name,code:created.code||'',birthdate:created.birthdate||'',points:pts,avatar:window._tmpAvatar,mustChange:true,pw:'',user_id:created.user_id,attendance:{}});
     logAction({type:'student',detail:'เพิ่มนักเรียน: '+name});
   }
   closeModal();render();banner('บันทึกข้อมูลนักเรียนแล้ว');
