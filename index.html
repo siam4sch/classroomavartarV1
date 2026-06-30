@@ -319,8 +319,8 @@ const isAdmin=()=>session?.role==='admin';
 const isTeacher=()=>session?.role==='teacher';
 const isStudent=()=>session?.role==='student';
 const userById=id=>DB.users.find(u=>u.id===id);
-function myClassrooms(){return isAdmin()?DB.classrooms.slice():DB.classrooms.filter(c=>c.ownerId===session.id);}
-function canSeeClass(cid){const c=clsById(cid);return c&&(isAdmin()||c.ownerId===session.id);}
+function myClassrooms(){return isAdmin()?DB.classrooms.slice():DB.classrooms.filter(c=>c.ownerId===session.id||(c.teacherIds||[]).includes(session.id));}
+function canSeeClass(cid){const c=clsById(cid);return c&&(isAdmin()||c.ownerId===session.id||(c.teacherIds||[]).includes(session.id));}
 function mySubjects(){const ids=myClassrooms().map(c=>c.id);return DB.subjects.filter(s=>(s.classroomIds||[]).some(x=>ids.includes(x)));}
 
 /* ---------- DATA HELPERS ---------- */
@@ -425,7 +425,7 @@ async function afterAuth(user){
   await sb.auth.signOut();banner('ไม่พบบัญชีนี้ในระบบ',true);
 }
 async function loadFromSupabase(){
-  const [rSet,rProf,rCls,rStu,rSubj,rSubCls,rAsg,rScore,rAtt,rLog]=await Promise.all([
+  const [rSet,rProf,rCls,rStu,rSubj,rSubCls,rAsg,rScore,rAtt,rLog,rCT]=await Promise.all([
     sb.from('settings').select('*'),
     sb.from('profiles').select('*'),
     sb.from('classrooms').select('*'),
@@ -436,6 +436,7 @@ async function loadFromSupabase(){
     sb.from('scores').select('*'),
     sb.from('attendance').select('*'),
     sb.from('logs').select('*').order('at',{ascending:false}).limit(200),
+    sb.from('classroom_teachers').select('*'),
   ]);
   [rSet,rProf,rCls,rStu,rSubj,rSubCls,rAsg,rScore,rAtt,rLog].forEach(r=>{if(r.error)console.warn('load error:',r.error.message);});
 
@@ -449,7 +450,9 @@ async function loadFromSupabase(){
   DB.users=(rProf.data||[]).map(p=>({id:p.id,username:p.username,name:p.name,role:p.role,active:p.active}));
 
   // classrooms
-  DB.classrooms=(rCls.data||[]).map(c=>({id:c.id,ownerId:c.owner_id,name:c.name,level:c.level||'',year:c.year||''}));
+  const ctMap={};
+  (rCT.data||[]).forEach(r=>{(ctMap[r.classroom_id]=ctMap[r.classroom_id]||[]).push(r.teacher_id);});
+  DB.classrooms=(rCls.data||[]).map(c=>({id:c.id,ownerId:c.owner_id,name:c.name,level:c.level||'',year:c.year||'',teacherIds:ctMap[c.id]||[]}));
 
   // subject -> classroomIds
   const scMap={};
@@ -639,7 +642,7 @@ function closeWorkspace(){wsOpen=null;render();}
 function setWsTab(t){wsTab=t;render();}
 function renderClassPage(){const el=document.getElementById('page-class');const mine=myClassrooms();
   if(!wsOpen||!clsById(wsOpen)||!canSeeClass(wsOpen)){
-    setTopActions(`<button class="btn sm" onclick="classroomModal()">+ ชั้นเรียน</button>`);
+      setTopActions(isAdmin()?`<button class="btn sm" onclick="classroomModal()">+ ชั้นเรียน</button>`:'');
     if(!mine.length){el.innerHTML=`<div class="empty"><div class="big">🏫</div>${isAdmin()?'ยังไม่มีชั้นเรียนในระบบ':'คุณยังไม่มีชั้นเรียน'}<br>สร้างชั้นเรียนเพื่อเริ่มเพิ่มนักเรียนและรายวิชา<br><button class="btn" onclick="classroomModal()">+ สร้างชั้นเรียน</button></div>`;return;}
     el.innerHTML=`<p class="meta" style="margin-bottom:14px">${isAdmin()?'คุณเห็นทุกห้องในระบบ':'แสดงเฉพาะห้องที่คุณเป็นเจ้าของ'} · แตะ "เปิดห้องเรียน" เพื่อจัดการ</p>`+
       mine.map(c=>{const ns=studentsOf(c.id).length,sj=subjectsOf(c.id).length,active=c.id===activeClassId,owner=userById(c.ownerId);
@@ -648,7 +651,7 @@ function renderClassPage(){const el=document.getElementById('page-class');const 
           <div class="meta">${esc(c.level||'')} · ปีการศึกษา ${esc(c.year)}</div>
           <div class="meta" style="margin-top:3px">👧 ${ns} คน · 📚 ${sj} วิชา${isAdmin()?' · ครู: '+esc(owner?.name||'-'):''}</div>
           <div class="row" style="margin-top:13px"><button class="btn sm" onclick="openWorkspace('${c.id}')">เปิดห้องเรียน →</button>
-            <button class="btn sm gray" onclick="classroomModal('${c.id}')">แก้ไข</button><button class="btn sm red" onclick="delClassroom('${c.id}')">ลบ</button></div></div>`;}).join('');
+            ${isAdmin()?`<button class="btn sm gray" onclick="classroomModal('${c.id}')">แก้ไข</button><button class="btn sm red" onclick="delClassroom('${c.id}')">ลบ</button>`:''}</div></div>`;}).join('');
     return;}
   setTopActions('');const c=activeCls();
   const tabs=[['students','👧 นักเรียน'],['subjects','📚 รายวิชา'],['assign','📝 ชิ้นงาน']];
@@ -656,20 +659,24 @@ function renderClassPage(){const el=document.getElementById('page-class');const 
   el.innerHTML=`<div class="wshead"><button class="wsback" onclick="closeWorkspace()">‹</button>
     <div><div style="font-size:18px;font-weight:700">${esc(c.name)}</div><div class="meta">${esc(c.level||'')} · ${classLevelType()==='secondary'?'มัธยม':'ประถม'} · ปีการศึกษา ${esc(c.year)}</div></div></div>
     <div class="subtabs">${tabs.map(([k,lb])=>`<button class="subtab ${wsTab===k?'active':''}" onclick="setWsTab('${k}')">${lb}</button>`).join('')}</div>${body}`;}
-function wsStudents(){const studs=clsStudents();
-  const selBtn=studs.length?`<button class="btn sm ${stuSelMode?'red':'gray'}" onclick="toggleStuSel()">${stuSelMode?'✕ ยกเลิกเลือก':'☑︎ เลือกหลายคน'}</button>`:'';
-  const head=`<div class="row" style="margin-bottom:14px"><button class="btn sm" onclick="studentModal()">+ เพิ่มนักเรียน</button>
-    <button class="btn sm gray" onclick="importModal()">⬆︎ นำเข้า CSV</button><button class="btn sm gray" onclick="exportCSV()">⬇︎ ส่งออก</button>${selBtn}</div>`;
-  if(!studs.length)return head+`<div class="empty"><div class="big">🐾</div>ยังไม่มีนักเรียน<br><button class="btn" onclick="studentModal()">+ เพิ่มนักเรียน</button></div>`;
-  const hint=stuSelMode
-    ?`<p class="meta" style="margin-bottom:12px;color:var(--blue)">แตะนักเรียนเพื่อเลือก (เลือกได้หลายคน) แล้วกดปุ่มลบด้านล่าง</p>`
-    :`<p class="meta" style="margin-bottom:12px">⚠️ หมายถึงยังขาดรหัสนักเรียนหรือวันเกิด นักเรียนจะยังเข้าระบบไม่ได้จนกว่าจะกรอกครบ</p>`;
+
+function wsStudents(){const studs=clsStudents();const admin=isAdmin();
+  const selBtn=(admin&&studs.length)?`<button class="btn sm ${stuSelMode?'red':'gray'}" onclick="toggleStuSel()">${stuSelMode?'✕ ยกเลิกเลือก':'☑︎ เลือกหลายคน'}</button>`:'';
+  const head=admin
+    ?`<div class="row" style="margin-bottom:14px"><button class="btn sm" onclick="studentModal()">+ เพิ่มนักเรียน</button>
+       <button class="btn sm gray" onclick="importModal()">⬆︎ นำเข้า CSV</button><button class="btn sm gray" onclick="exportCSV()">⬇︎ ส่งออก</button>${selBtn}</div>`
+    :`<p class="meta" style="margin-bottom:14px">📋 รายชื่อนักเรียนจัดการโดยผู้ดูแลระบบ · คุณดูรายชื่อได้และนำไปเช็กชื่อ/ให้คะแนนในหน้าเช็กชื่อ</p>`;
+  if(!studs.length)return head+`<div class="empty"><div class="big">🐾</div>ยังไม่มีนักเรียน${admin?'<br><button class="btn" onclick="studentModal()">+ เพิ่มนักเรียน</button>':''}</div>`;
+  const hint=admin&&stuSelMode
+    ?`<p class="meta" style="margin-bottom:12px;color:var(--blue)">แตะนักเรียนเพื่อเลือก แล้วกดปุ่มลบด้านล่าง</p>`
+    :`<p class="meta" style="margin-bottom:12px">${admin?'⚠️ หมายถึงยังขาดรหัสนักเรียนหรือวันเกิด':'แตะการ์ดเพื่อดูข้อมูล'}</p>`;
   const grid=`<div class="grid">${studs.map(s=>{const ready=s.code&&(s.pw||validBirth(s.birthdate));const picked=stuSel.has(s.id);
-    const onclick=stuSelMode?`toggleStuPick('${s.id}')`:`studentModal('${s.id}')`;
-    return`<div class="scard ${picked?'picked':''}" onclick="${onclick}">${stuSelMode?(picked?`<div class="pick">✓</div>`:''):(ready?'':'<div class="warn">⚠️</div>')}<div class="no">${s.number}</div><div class="avatar">${avatarSVG(s.avatar)}</div><div class="name">${esc(s.name)}</div><div class="code">${esc(s.code||'— ไม่มีรหัส —')}</div><div class="pts">⭐ ${s.points||0}</div></div>`;}).join('')}</div>`;
-  const bar=stuSelMode?`<div class="savebar"><button class="btn red" ${stuSel.size?'':'disabled'} onclick="bulkDeleteStudents()">🗑 ลบที่เลือก (${stuSel.size} คน)</button><button class="btn gray" onclick="selectAllStu()">เลือกทั้งหมด</button></div>`:'';
+    const onclick=!admin?'':stuSelMode?`toggleStuPick('${s.id}')`:`studentModal('${s.id}')`;
+    return`<div class="scard ${picked?'picked':''}" ${onclick?`onclick="${onclick}"`:''}>${admin&&stuSelMode?(picked?`<div class="pick">✓</div>`:''):(admin&&!ready?'<div class="warn">⚠️</div>':'')}<div class="no">${s.number}</div><div class="avatar">${avatarSVG(s.avatar)}</div><div class="name">${esc(s.name)}</div><div class="code">${esc(s.code||'— ไม่มีรหัส —')}</div><div class="pts">⭐ ${s.points||0}</div></div>`;}).join('')}</div>`;
+  const bar=(admin&&stuSelMode)?`<div class="savebar"><button class="btn red" ${stuSel.size?'':'disabled'} onclick="bulkDeleteStudents()">🗑 ลบที่เลือก (${stuSel.size} คน)</button><button class="btn gray" onclick="selectAllStu()">เลือกทั้งหมด</button></div>`:'';
   return head+hint+grid+bar;
 }
+  
 function toggleStuSel(){stuSelMode=!stuSelMode;stuSel.clear();render();}
 function toggleStuPick(id){if(stuSel.has(id))stuSel.delete(id);else stuSel.add(id);render();}
 function selectAllStu(){const studs=clsStudents();if(stuSel.size===studs.length)stuSel.clear();else studs.forEach(s=>stuSel.add(s.id));render();}
@@ -710,30 +717,50 @@ function wsAssign(){const subs=clsSubjects();
     :`<div class="empty"><div class="big">📋</div>ยังไม่มีชิ้นงาน<br><button class="btn" onclick="assignModal()">+ เพิ่มชิ้นงาน</button></div>`}`;}
 
 /* ---------- CLASSROOM CRUD ---------- */
+function toggleTeacherChk(id){const i=window._tmpTeacherIds.indexOf(id);if(i>=0)window._tmpTeacherIds.splice(i,1);else window._tmpTeacherIds.push(id);
+  document.querySelectorAll('.chkrow[data-t]').forEach(r=>{const on=window._tmpTeacherIds.includes(r.dataset.t);r.classList.toggle('on',on);r.querySelector('input').checked=on;});}
 function classroomModal(id){const c=id?clsById(id):null;
-  const ownerSel=isAdmin()?`<label class="fl">ครูเจ้าของห้อง</label><select id="cl_owner">${DB.users.filter(u=>u.role==='teacher'||u.role==='admin').map(u=>`<option value="${u.id}" ${(c?c.ownerId:session.id)===u.id?'selected':''}>${esc(u.name)} (${ROLELABEL[u.role]})</option>`).join('')}</select>`:'';
+  let staffBox='';
+  if(isAdmin()){
+    const teachers=DB.users.filter(u=>u.role==='teacher'||u.role==='admin');
+    window._tmpTeacherIds=c?[...(c.teacherIds||[])]:[];
+    const ownerSel=`<label class="fl">ครูประจำชั้น (homeroom)</label><select id="cl_owner">${teachers.map(u=>`<option value="${u.id}" ${(c?c.ownerId:session.id)===u.id?'selected':''}>${esc(u.name)} (${ROLELABEL[u.role]})</option>`).join('')}</select>`;
+    const checks=teachers.map(u=>{const on=window._tmpTeacherIds.includes(u.id);return`<div class="chkrow ${on?'on':''}" data-t="${u.id}" onclick="toggleTeacherChk('${u.id}')"><input type="checkbox" ${on?'checked':''} onclick="event.preventDefault()"><div><div class="cn">${esc(u.name)}</div><div class="meta">${ROLELABEL[u.role]}</div></div></div>`;}).join('')||`<p class="meta">ยังไม่มีครูในระบบ</p>`;
+    staffBox=ownerSel+`<label class="fl" style="margin-top:6px">ครูที่เข้าสอนห้องนี้ (เลือกได้หลายคน)</label>${checks}`;
+  }
   openModal(`<h2>${c?'แก้ไข':'เพิ่ม'}ชั้นเรียน</h2>
-    <label class="fl">ชื่อชั้น (เช่น ป.6/1 หรือ ม.3/2)</label><input id="cl_name" value="${c?esc(c.name):''}">
-    <label class="fl">ระดับชั้น</label><input id="cl_level" value="${c?esc(c.level||''):''}" placeholder="ประถมศึกษาปีที่ 6 / มัธยมศึกษาปีที่ 3">
+    <label class="fl">ชื่อชั้น (เช่น ป.4/1 หรือ ม.3/2)</label><input id="cl_name" value="${c?esc(c.name):''}">
+    <label class="fl">ระดับชั้น</label><input id="cl_level" value="${c?esc(c.level||''):''}" placeholder="ประถมศึกษาปีที่ 4">
     <label class="fl">ปีการศึกษา</label><input id="cl_year" value="${c?esc(c.year):'2568'}">
-    ${ownerSel}
-    <div class="row" style="margin-top:8px"><button class="btn" onclick="saveClassroom('${id||''}')">บันทึก</button>${c?`<button class="btn red" onclick="delClassroom('${id}')">ลบ</button>`:''}<button class="btn gray" onclick="closeModal()">ยกเลิก</button></div>`);}
+    ${staffBox}
+    <div class="row" style="margin-top:8px"><button class="btn" onclick="saveClassroom('${id||''}')">บันทึก</button>${c&&isAdmin()?`<button class="btn red" onclick="delClassroom('${id}')">ลบ</button>`:''}<button class="btn gray" onclick="closeModal()">ยกเลิก</button></div>`);}
 async function saveClassroom(id){
   const d={name:val('cl_name'),level:val('cl_level'),year:val('cl_year')};
   if(!d.name)return banner('กรุณากรอกชื่อชั้น');
-  const owner=isAdmin()?(val('cl_owner')||session.id):session.id;
+  const owner=isAdmin()?(val('cl_owner')||session.id):(clsById(id)?.ownerId||session.id);
+  let teacherIds=isAdmin()?[...(window._tmpTeacherIds||[])]:(clsById(id)?.teacherIds||[]);
+  if(owner&&!teacherIds.includes(owner))teacherIds.push(owner); // ครูประจำชั้นเข้าสอนด้วยเสมอ
+  let cid=id;
   if(id){
     if(!canSeeClass(id))return banner('ไม่มีสิทธิ์',true);
     const {error}=await sb.from('classrooms').update({name:d.name,level:d.level,year:d.year,owner_id:owner}).eq('id',id);
     if(error)return banner('บันทึกไม่สำเร็จ: '+error.message,true);
-    Object.assign(clsById(id),d,{ownerId:owner});
+    Object.assign(clsById(id),d,{ownerId:owner,teacherIds});
   }else{
     const {data,error}=await sb.from('classrooms').insert({name:d.name,level:d.level,year:d.year,owner_id:owner}).select().single();
     if(error)return banner('บันทึกไม่สำเร็จ: '+error.message,true);
-    const nc={id:data.id,ownerId:data.owner_id,name:data.name,level:data.level||'',year:data.year||''};
-    DB.classrooms.push(nc);activeClassId=nc.id;wsOpen=nc.id;wsTab='students';
-    logAction({type:'class',detail:'สร้างห้อง '+nc.name});
+    cid=data.id;
+    DB.classrooms.push({id:cid,ownerId:owner,name:data.name,level:data.level||'',year:data.year||'',teacherIds});
+    activeClassId=cid;wsOpen=cid;wsTab='students';
   }
+  if(isAdmin()){
+    await sb.from('classroom_teachers').delete().eq('classroom_id',cid);
+    if(teacherIds.length){
+      const {error:e2}=await sb.from('classroom_teachers').insert(teacherIds.map(tid=>({classroom_id:cid,teacher_id:tid})));
+      if(e2)return banner('บันทึกครูไม่สำเร็จ: '+e2.message,true);
+    }
+  }
+  logAction({type:'class',detail:(id?'แก้ไข':'สร้าง')+'ห้อง '+d.name});
   closeModal();render();banner('บันทึกชั้นเรียนแล้ว');
 }
 async function delClassroom(id){
