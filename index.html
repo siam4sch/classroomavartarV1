@@ -11,7 +11,6 @@
 <link href="https://fonts.googleapis.com/css2?family=Mitr:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <style>
   :root{
@@ -1188,40 +1187,20 @@ function renderStats(){setTopActions('');const el=document.getElementById('page-
    ============================================================ */
 let printSel='all';
 /* ---------- QR LIBRARY LOADER (กันโหลดไม่ติดจาก CDN เดียว) ---------- */
-let _qrLibPromise=null;
-function loadScript(src){return new Promise((res,rej)=>{const s=document.createElement('script');s.src=src;s.onload=res;s.onerror=()=>rej(new Error(src));document.head.appendChild(s);});}
-function qrReady(){return window.QRCode&&(QRCode.toCanvas||QRCode.toDataURL);}
-function ensureQRLib(){
-  if(qrReady())return Promise.resolve(true);
-  if(_qrLibPromise)return _qrLibPromise;
-  const cdns=[
-    'https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js',
-    'https://unpkg.com/qrcode@1.5.3/build/qrcode.min.js'
-  ];
-  _qrLibPromise=(async()=>{
-    for(const url of cdns){try{await loadScript(url);if(qrReady())return true;}catch(e){}}
-    return false;
-  })();
-  return _qrLibPromise;
-}
+
+
+
+
 
 function genQRCard(elId,text){
-  const el=document.getElementById(elId);if(!el)return;const v=String(text||'-');
+  const el=document.getElementById(elId);if(!el)return;
+  const v=String(text||'-');
   const fallback=()=>{el.innerHTML=`<div style="font-size:9px;line-height:1.25;text-align:center;word-break:break-all;padding:4px;color:#1f2540;font-weight:600">${esc(v)}</div>`;};
-  const draw=()=>{
-    try{
-      if(window.QRCode&&QRCode.toCanvas){
-        el.innerHTML='';const c=document.createElement('canvas');el.appendChild(c);
-        QRCode.toCanvas(c,v,{width:240,margin:1,errorCorrectionLevel:'M',color:{dark:'#1f2540',light:'#ffffff'}},err=>{
-          if(err&&QRCode.toDataURL){QRCode.toDataURL(v,{width:240,margin:1},(e2,url)=>e2?fallback():el.innerHTML=`<img src="${url}">`);}
-          else if(err)fallback();
-        });
-      }else if(window.QRCode&&QRCode.toDataURL){
-        QRCode.toDataURL(v,{width:240,margin:1},(err,url)=>err?fallback():el.innerHTML=`<img src="${url}">`);
-      }else fallback();
-    }catch(e){fallback();}
-  };
-  ensureQRLib().then(ok=>{if(!document.getElementById(elId))return;ok?draw():fallback();});
+  const src='https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=0&data='+encodeURIComponent(v);
+  const img=new Image();
+  img.onload=()=>{el.innerHTML='';el.appendChild(img);};
+  img.onerror=fallback;
+  img.src=src;
 }
 
 function renderPrint(){setTopActions('');const el=document.getElementById('page-print');const mine=myClassrooms();
