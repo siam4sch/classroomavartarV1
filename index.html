@@ -615,22 +615,6 @@ function userModal(id){const u=id?userById(id):null;const isSelf=u&&u.id===sessi
       ${u&&!isSelf?`<button class="btn red" onclick="delUser('${id}')">ลบบัญชี</button>`:''}
       <button class="btn gray" onclick="closeModal()">ยกเลิก</button></div>
     ${isSelf?'<p class="meta" style="margin-top:10px">นี่คือบัญชีของคุณ ลบไม่ได้</p>':''}`);}
-async function saveUser(id){const u=id?userById(id):null;
-  const name=val('u_name'),username=val('u_user'),role=val('u_role'),pass=val('u_pass');
-  const active=document.getElementById('u_active').checked;
-  if(!name||!username)return banner('กรอกชื่อและชื่อผู้ใช้',true);
-  if(DB.users.some(x=>x.username.toLowerCase()===username.toLowerCase()&&x.id!==id))return banner('ชื่อผู้ใช้นี้มีอยู่แล้ว',true);
-  if(!u&&!pass)return banner('กำหนดรหัสผ่าน',true);
-  if(u&&u.role==='admin'&&role!=='admin'){const others=DB.users.filter(x=>x.role==='admin'&&x.active&&x.id!==id);if(!others.length)return banner('ต้องมีผู้ดูแลที่ใช้งานได้อย่างน้อย 1 บัญชี',true);}
-  const data={name,username,role,active};
-  if(pass)data.password=await sha256(pass);
-  if(u){Object.assign(u,data);logAction({type:'user',detail:'แก้ไขบัญชี '+username});}
-  else{DB.users.push({id:uid(),createdAt:new Date().toISOString(),...data});logAction({type:'user',detail:'สร้างบัญชี '+username+' ('+ROLELABEL[role]+')'});}
-  save();closeModal();render();banner('บันทึกบัญชีแล้ว');}
-function delUser(id){const u=userById(id);if(u.id===session.id)return banner('ลบบัญชีตัวเองไม่ได้',true);
-  if(u.role==='admin'){const others=DB.users.filter(x=>x.role==='admin'&&x.active&&x.id!==id);if(!others.length)return banner('ต้องเหลือผู้ดูแลอย่างน้อย 1 บัญชี',true);}
-  if(!confirm(`ลบบัญชี "${u.name}"?\nข้อมูลห้อง/นักเรียนที่บัญชีนี้สร้างจะยังอยู่ (ไม่ถูกลบ)`))return;
-  DB.users=DB.users.filter(x=>x.id!==id);logAction({type:'user',detail:'ลบบัญชี '+u.username});save();closeModal();render();banner('ลบบัญชีแล้ว');}
 
 /* ============================================================
    PAGE: CLASS + WORKSPACE
