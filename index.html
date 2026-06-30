@@ -790,7 +790,7 @@ async function saveStudent(id){
     if(error)return banner('บันทึกไม่สำเร็จ: '+error.message,true);
     Object.assign(DB.students.find(x=>x.id===id),{number,name,code,birthdate:birth,points:row.points,avatar:row.avatar});
   }else{
-    const res=await sb.functions.invoke('provision-student',{
+    const res=await sb.functions.invoke('clever-function',{
       body:{code,name,birthdate:birth,classroom_id:activeClassId,number}});
     if(res.error||!res.data?.ok){
       const msg=res.data?.error||res.error?.message||'ไม่ทราบสาเหตุ';
@@ -866,7 +866,7 @@ async function doImport(){
   banner(`กำลังนำเข้า ${valid.length} คน...`);
   let ok=0,fail=0;const failNames=[];
   for(const r of valid){
-    const res=await sb.functions.invoke('provision-student',{
+       const res=await sb.functions.invoke('clever-function',{
       body:{code:r.code,name:r.name,birthdate:r.birthdate,classroom_id:activeClassId,number:r.number}});
     if(res.error||!res.data?.ok){fail++;failNames.push(r.name);continue;}
     const c=res.data.student;
